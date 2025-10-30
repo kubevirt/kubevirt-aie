@@ -66,13 +66,17 @@ import (
 )
 
 const (
-	containerDisks   = "container-disks"
-	hotplugDisks     = "hotplug-disks"
-	hookSidecarSocks = "hook-sidecar-sockets"
-	varRun           = "/var/run"
-	virtBinDir       = "virt-bin-share-dir"
-	hotplugDisk      = "hotplug-disk"
-	virtExporter     = "virt-exporter"
+	containerDisks    = "container-disks"
+	hotplugDisks      = "hotplug-disks"
+	hookSidecarSocks  = "hook-sidecar-sockets"
+	podInfoVolumeName = "podinfo"
+	podInfoMountPath  = util.VirtPrivateDir + "/downwardapi/podinfo"
+	podInfoLabelsFile = "labels"
+	podInfoAnnotsFile = "annotations"
+	varRun            = "/var/run"
+	virtBinDir        = "virt-bin-share-dir"
+	hotplugDisk       = "hotplug-disk"
+	virtExporter      = "virt-exporter"
 )
 
 const KvmDevice = "devices.kubevirt.io/kvm"
@@ -492,7 +496,7 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 	var sidecarVolumes []k8sv1.Volume
 	for i, requestedHookSidecar := range requestedHookSidecarList {
 		sidecarContainer := newSidecarContainerRenderer(
-			sidecarContainerName(i), vmi, sidecarResources(vmi, t.clusterConfig), requestedHookSidecar, userId).Render(requestedHookSidecar.Command)
+			sidecarContainerName(i), vmi, volumeRenderer, sidecarResources(vmi, t.clusterConfig), requestedHookSidecar, userId).Render(requestedHookSidecar.Command)
 
 		if requestedHookSidecar.ConfigMap != nil {
 			cm, err := t.virtClient.CoreV1().ConfigMaps(vmi.Namespace).Get(context.TODO(), requestedHookSidecar.ConfigMap.Name, metav1.GetOptions{})
@@ -765,9 +769,29 @@ func initContainerVolumeMount() k8sv1.VolumeMount {
 	}
 }
 
-func newSidecarContainerRenderer(sidecarName string, vmiSpec *v1.VirtualMachineInstance, resources k8sv1.ResourceRequirements, requestedHookSidecar hooks.HookSidecar, userId int64) *ContainerSpecRenderer {
+func newSidecarContainerRenderer(sidecarName string, vmiSpec *v1.VirtualMachineInstance, volumeRenderer *VolumeRenderer, resources k8sv1.ResourceRequirements, requestedHookSidecar hooks.HookSidecar, userId int64) *ContainerSpecRenderer {
+	// (Nvidia) NGN/VMaaS Customized commit.
+	// defines the podinfo constants and reorders sidecar mounts so the shared socket mount gains the correct subpath while keeping other mounts intact.
+	baseMounts := volumeRenderer.Mounts()
+	sidecarMounts := make([]k8sv1.VolumeMount, 0, len(baseMounts))
+	remainingMounts := make([]k8sv1.VolumeMount, 0, len(baseMounts))
+	for _, mount := range baseMounts {
+		if mount.Name == hookSidecarSocks {
+			mount.SubPath = sidecarName
+			sidecarMounts = append(sidecarMounts, mount)
+		} else {
+			remainingMounts = append(remainingMounts, mount)
+		}
+	}
+	if len(sidecarMounts) == 0 {
+		sidecarMounts = baseMounts
+	} else {
+		sidecarMounts = append(sidecarMounts, remainingMounts...)
+	}
+
 	sidecarOpts := []Option{
 		WithResourceRequirements(resources),
+		WithVolumeMounts(sidecarMounts...),
 		WithArgs(requestedHookSidecar.Args),
 		WithExtraEnvVars([]k8sv1.EnvVar{
 			k8sv1.EnvVar{
@@ -777,7 +801,8 @@ func newSidecarContainerRenderer(sidecarName string, vmiSpec *v1.VirtualMachineI
 	}
 
 	var mounts []k8sv1.VolumeMount
-	mounts = append(mounts, sidecarVolumeMount(sidecarName))
+	// (Nividia) NGN/VMaaS Customized commit. Remove the duplicate sidecarVolumeMount() - it's already included in volumeRenderer.Mounts()
+	// mounts = append(mounts, sidecarVolumeMount())
 	if requestedHookSidecar.DownwardAPI == v1.DeviceInfo {
 		mounts = append(mounts, mountPath(downwardapi.NetworkInfoVolumeName, downwardapi.MountPath))
 	}
@@ -787,7 +812,7 @@ func newSidecarContainerRenderer(sidecarName string, vmiSpec *v1.VirtualMachineI
 	if requestedHookSidecar.PVC != nil {
 		mounts = append(mounts, pvcVolumeMount(*requestedHookSidecar.PVC))
 	}
-	sidecarOpts = append(sidecarOpts, WithVolumeMounts(mounts...))
+	sidecarOpts = append(sidecarOpts, WithAdditionalVolumeMounts(mounts...))
 
 	if util.IsNonRootVMI(vmiSpec) {
 		sidecarOpts = append(sidecarOpts, WithNonRoot(userId))
@@ -914,13 +939,13 @@ func (t *TemplateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, ne
 	return NewResourceRenderer(vmiResources.Limits, vmiResources.Requests, options...), nil
 }
 
-func sidecarVolumeMount(containerName string) k8sv1.VolumeMount {
-	return k8sv1.VolumeMount{
-		Name:      hookSidecarSocks,
-		MountPath: hooks.HookSocketsSharedDirectory,
-		SubPath:   containerName,
-	}
-}
+// func sidecarVolumeMount(containerName string) k8sv1.VolumeMount {
+// 	return k8sv1.VolumeMount{
+// 		Name:      hookSidecarSocks,
+// 		MountPath: hooks.HookSocketsSharedDirectory,
+// 		SubPath:   containerName,
+// 	}
+// }
 
 func configMapVolumeMount(v hooks.ConfigMap) k8sv1.VolumeMount {
 	return k8sv1.VolumeMount{
