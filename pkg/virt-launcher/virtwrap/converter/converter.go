@@ -1850,16 +1850,17 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers, scsiController)
 	}
 
-	if c.Architecture.SupportPCIHole64Disabling() && shouldDisablePCIHole64(vmi) {
+	pciHole64, err := getPCIHole64(vmi, c.Architecture.SupportPCIHole64Disabling())
+	if err != nil {
+		return err
+	}
+	if pciHole64 != nil {
 		domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers,
 			api.Controller{
-				Type:  "pci",
-				Index: "0",
-				Model: "pcie-root",
-				PCIHole64: &api.PCIHole64{
-					Value: 0,
-					Unit:  "KiB",
-				},
+				Type:      "pci",
+				Index:     "0",
+				Model:     "pcie-root",
+				PCIHole64: pciHole64,
 			},
 		)
 	}
@@ -2151,6 +2152,55 @@ func shouldDisablePCIHole64(vmi *v1.VirtualMachineInstance) bool {
 		return strings.EqualFold(val, "true")
 	}
 	return false
+}
+
+func getPCIHole64(vmi *v1.VirtualMachineInstance, supportsDisable bool) (*api.PCIHole64, error) {
+	if val, ok := vmi.Annotations[v1.PCIHole64Size]; ok {
+		sizeKiB, err := parsePCIHole64Size(val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s annotation value %q: %w", v1.PCIHole64Size, val, err)
+		}
+		return &api.PCIHole64{
+			Value: sizeKiB,
+			Unit:  "KiB",
+		}, nil
+	}
+
+	if supportsDisable && shouldDisablePCIHole64(vmi) {
+		return &api.PCIHole64{
+			Value: 0,
+			Unit:  "KiB",
+		}, nil
+	}
+
+	return nil, nil
+}
+
+// maxPCIHole64SizeKiB is a reasonable upper limit for the 64-bit PCI hole size.
+// 16 TiB should be sufficient for current GPU/accelerator memory requirements, including GB200/300 NVL72 platforms.
+const maxPCIHole64SizeKiB = uint64(16) << 30 // 16 TiB in KiB
+
+func parsePCIHole64Size(val string) (uint, error) {
+	trimmed := strings.TrimSpace(val)
+	if trimmed == "" {
+		return 0, errors.New("must not be empty")
+	}
+
+	size, err := strconv.ParseUint(trimmed, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid numeric value: %w", err)
+	}
+	if size == 0 {
+		return 0, errors.New("value must be greater than 0; use DisablePCIHole64 annotation to disable")
+	}
+	if size > maxPCIHole64SizeKiB {
+		return 0, fmt.Errorf("value %d KiB exceeds maximum allowed %d KiB (16 TiB)", size, maxPCIHole64SizeKiB)
+	}
+	if size > uint64(^uint(0)) {
+		return 0, errors.New("value does not fit in uint")
+	}
+
+	return uint(size), nil
 }
 
 func getBusFromDisk(disk v1.Disk) v1.DiskBus {

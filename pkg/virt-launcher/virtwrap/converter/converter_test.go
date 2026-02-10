@@ -1483,6 +1483,60 @@ var _ = Describe("Converter", func() {
 			Entry("not be set on s390x when annotation was set not to true", s390x, "something", false),
 		)
 
+		DescribeTable("PCIHole64 size on pcie-root Controller should", func(arch, value string, disable bool, expected uint64) {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			if vmi.Annotations == nil {
+				vmi.Annotations = make(map[string]string)
+			}
+			vmi.Annotations[v1.PCIHole64Size] = value
+			if disable {
+				vmi.Annotations[v1.DisablePCIHole64] = "true"
+			}
+
+			c.Architecture = archconverter.NewConverter(arch)
+			domain := vmiToDomain(vmi, c)
+
+			var pciHole64 *api.PCIHole64
+			for _, controller := range domain.Spec.Devices.Controllers {
+				if controller.Type == "pci" && controller.Index == "0" && controller.Model == "pcie-root" {
+					pciHole64 = controller.PCIHole64
+					break
+				}
+			}
+			Expect(pciHole64).ToNot(BeNil())
+			Expect(pciHole64.Unit).To(Equal("KiB"))
+			Expect(uint64(pciHole64.Value)).To(Equal(expected))
+		},
+			Entry("be set on amd64 when custom value was provided", amd64, "4294967296", false, uint64(4294967296)),
+			Entry("be set on arm64 when custom value was provided", arm64, "4294967296", false, uint64(4294967296)),
+			Entry("be set on s390x when custom value was provided", s390x, "4294967296", false, uint64(4294967296)),
+			Entry("prefer custom value over disable annotation on amd64", amd64, "1024", true, uint64(1024)),
+		)
+
+		It("should reject invalid PCIHole64 size annotation", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Annotations = map[string]string{
+				v1.PCIHole64Size: "4TiB",
+			}
+			Expect(Convert_v1_VirtualMachineInstance_To_api_Domain(vmi, &api.Domain{}, c)).ToNot(Succeed())
+		})
+
+		It("should reject zero PCIHole64 size annotation", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Annotations = map[string]string{
+				v1.PCIHole64Size: "0",
+			}
+			Expect(Convert_v1_VirtualMachineInstance_To_api_Domain(vmi, &api.Domain{}, c)).ToNot(Succeed())
+		})
+
+		It("should reject PCIHole64 size exceeding maximum", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Annotations = map[string]string{
+				v1.PCIHole64Size: "17179869185", // 16 TiB + 1 KiB
+			}
+			Expect(Convert_v1_VirtualMachineInstance_To_api_Domain(vmi, &api.Domain{}, c)).ToNot(Succeed())
+		})
+
 		It("should fail when input device is set to ps2 bus", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.Inputs[0].Bus = "ps2"
