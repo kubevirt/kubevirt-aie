@@ -3,18 +3,22 @@
 set -ex
 
 source hack/common.sh
+# Skip bootstrap and sandbox checks during rpm-deps as we're regenerating the targets
+KUBEVIRT_SKIP_BOOTSTRAP=true
+KUBEVIRT_BOOTSTRAPPING=true
+export KUBEVIRT_BOOTSTRAPPING
 source hack/bootstrap.sh
 source hack/config.sh
 
-LIBVIRT_VERSION=${LIBVIRT_VERSION:-0:11.9.0-1.el9}
-QEMU_VERSION=${QEMU_VERSION:-17:10.1.0-10.el9}
-SEABIOS_VERSION=${SEABIOS_VERSION:-0:1.16.3-4.el9}
-EDK2_VERSION=${EDK2_VERSION:-0:20241117-8.el9}
-LIBGUESTFS_VERSION=${LIBGUESTFS_VERSION:-1:1.54.0-9.el9}
-GUESTFSTOOLS_VERSION=${GUESTFSTOOLS_VERSION:-0:1.52.2-5.el9}
-PASST_VERSION=${PASST_VERSION:-0:0^20250512.g8ec1341-2.el9}
-VIRTIOFSD_VERSION=${VIRTIOFSD_VERSION:-0:1.13.0-1.el9}
-SWTPM_VERSION=${SWTPM_VERSION:-0:0.8.0-2.el9}
+LIBVIRT_VERSION=${LIBVIRT_VERSION:-}
+QEMU_VERSION=${QEMU_VERSION:-}
+SEABIOS_VERSION=${SEABIOS_VERSION:-}
+EDK2_VERSION=${EDK2_VERSION:-}
+LIBGUESTFS_VERSION=${LIBGUESTFS_VERSION:-}
+GUESTFSTOOLS_VERSION=${GUESTFSTOOLS_VERSION:-}
+PASST_VERSION=${PASST_VERSION:-}
+VIRTIOFSD_VERSION=${VIRTIOFSD_VERSION:-}
+SWTPM_VERSION=${SWTPM_VERSION:-}
 SINGLE_ARCH=${SINGLE_ARCH:-""}
 BASESYSTEM=${BASESYSTEM:-"centos-stream-release"}
 
@@ -40,7 +44,7 @@ fi
 
 centos_main="
   acl
-  curl-minimal
+  curl
   vim-minimal
 "
 centos_extra="
@@ -57,11 +61,14 @@ testimage_main="
   nmap-ncat
   procps-ng
   qemu-img-${QEMU_VERSION}
-  sevctl
   tar
   targetcli
   util-linux
   which
+"
+# sevctl is x86_64-only in CS10
+testimage_x86_64="
+  sevctl
 "
 
 # create a rpmtree for libvirt-devel. libvirt-devel is needed for compilation and unit-testing.
@@ -187,7 +194,8 @@ if [ -z "${SINGLE_ARCH}" ] || [ "${SINGLE_ARCH}" == "x86_64" ]; then
         ${bazeldnf_repos} \
         $centos_main \
         $centos_extra \
-        $testimage_main
+        $testimage_main \
+        $testimage_x86_64
 
     bazel run \
         --config=${ARCHITECTURE} \
