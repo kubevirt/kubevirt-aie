@@ -1,4 +1,4 @@
-FROM quay.io/centos/centos:stream9
+FROM quay.io/centos/centos:stream10
 
 ARG ARCH
 ARG SONOBUOY_ARCH
@@ -13,10 +13,12 @@ ENV GOLANGCI_LINT_VERSION=v2.2.2
 ENV KUBEVIRT_CREATE_BAZELRCS=false
 
 # Install packages
+# Note: CentOS Stream 10 uses 'crb' repo like CS9
+# Note: CS10 uses Java 21 instead of Java 11
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --enable crb && \
     dnf install -y --setopt=install_weak_deps=False \
-        java-11-openjdk-devel \
+        java-21-openjdk-devel \
         libvirt-devel \
         cpio \
         patch \
@@ -58,9 +60,10 @@ ADD https://storage.googleapis.com/builddeps/swagger2markup-cli-1.3.3.jar /opt/s
 #
 # https://github.com/bazelbuild/bazel/issues/8665
 # https://github.com/bazelbuild/bazel/issues/11554
-RUN ln -s /usr/bin/python3 /usr/bin/python
+# Note: CS10 already has /usr/bin/python, so use -f to force
+RUN ln -sf /usr/bin/python3 /usr/bin/python
 
-ENV JAVA_HOME=/usr/lib/jvm/java-11
+ENV JAVA_HOME=/usr/lib/jvm/java-21
 
 # reference to master is for an external repo and can't yet be changed
 RUN mkdir -p /gimme && curl -sL \
