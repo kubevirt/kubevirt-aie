@@ -730,10 +730,16 @@ type HostDevice struct {
 	Alias     *Alias           `xml:"alias,omitempty"`
 	Display   string           `xml:"display,attr,omitempty"`
 	RamFB     string           `xml:"ramfb,attr,omitempty"`
+	ACPI      *ACPIHostDev     `xml:"acpi,omitempty"`
 }
 
 type HostDeviceSource struct {
 	Address *Address `xml:"address,omitempty"`
+}
+
+type ACPIHostDev struct {
+	XMLName xml.Name `xml:"acpi"`
+	NodeSet string   `xml:"nodeset,attr,omitempty"`
 }
 
 // END HostDevice -----------------------------
