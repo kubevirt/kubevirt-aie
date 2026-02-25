@@ -600,6 +600,22 @@ type MemoryDevice struct {
 	Address *Address      `xml:"address,omitempty"`
 }
 
+type IOMMUDevice struct {
+	XMLName xml.Name     `xml:"iommu"`
+	Model   string       `xml:"model,attr"`
+	Driver  *IOMMUDriver `xml:"driver,omitempty"`
+}
+
+type IOMMUDriver struct {
+	XMLName  xml.Name `xml:"driver"`
+	PciBus   string   `xml:"pciBus,attr"`
+	Accel    string   `xml:"accel,attr"`
+	Ats      string   `xml:"ats,attr"`
+	Ril      string   `xml:"ril,attr"`
+	SSIDSize string   `xml:"ssidsize,attr"`
+	Oas      string   `xml:"oas,attr"`
+}
+
 type Devices struct {
 	Emulator     string             `xml:"emulator,omitempty"`
 	Interfaces   []Interface        `xml:"interface"`
@@ -622,6 +638,7 @@ type Devices struct {
 	TPMs         []TPM              `xml:"tpm,omitempty"`
 	VSOCK        *VSOCK             `xml:"vsock,omitempty"`
 	Memory       *MemoryDevice      `xml:"memory,omitempty"`
+	IOMMU        []IOMMUDevice      `xml:"iommu,omitempty"`
 }
 
 type PanicDevice struct {
