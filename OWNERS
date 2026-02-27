@@ -4,6 +4,4 @@ reviewers:
   - code-reviewers
 approvers:
   - approvers
-emeritus_approvers:
-  - emeritus_approvers
-  
+emeritus_approvers: []
