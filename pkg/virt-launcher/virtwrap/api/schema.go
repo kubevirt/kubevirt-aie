@@ -730,6 +730,7 @@ type HostDevice struct {
 	Alias     *Alias           `xml:"alias,omitempty"`
 	Display   string           `xml:"display,attr,omitempty"`
 	RamFB     string           `xml:"ramfb,attr,omitempty"`
+	Driver    *HostDevDriver   `xml:"driver,omitempty"`
 	ACPI      *ACPIHostDev     `xml:"acpi,omitempty"`
 }
 
@@ -740,6 +741,11 @@ type HostDeviceSource struct {
 type ACPIHostDev struct {
 	XMLName xml.Name `xml:"acpi"`
 	NodeSet string   `xml:"nodeset,attr,omitempty"`
+}
+
+type HostDevDriver struct {
+	XMLName xml.Name `xml:"driver"`
+	Iommufd string   `xml:"iommufd,attr,omitempty"`
 }
 
 // END HostDevice -----------------------------
