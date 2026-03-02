@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Copyright 2025 Red Hat, Inc.
+# Copyright 2026 Red Hat, Inc.
 #
 # Syncs NV-variant RPMs (el10nv) for libvirt and qemu-kvm from the
 # CentOS Stream 10 internal koji build system into WORKSPACE and
@@ -294,92 +294,12 @@ done
 subpkg_list_file="${TMPDIR}/subpkg_list.txt"
 printf '%s\n' "${all_subpkg_names[@]}" >"${subpkg_list_file}"
 
-# Single awk pass:
-#   - Remove existing el10nv rpm() blocks for our sub-packages
-#   - Insert new el10nv rpm() blocks after the last el10 entry for each sub-package
+# Single awk pass to remove stale el10nv blocks and insert new ones.
+# See hack/sync-nv-rpms-update-workspace.awk for details.
 awk -v insert_map_file="${insert_map_file}" \
-    -v subpkg_list_file="${subpkg_list_file}" '
-BEGIN {
-    while ((getline line < insert_map_file) > 0) {
-        idx = index(line, "|")
-        if (idx > 0) {
-            iname = substr(line, 1, idx - 1)
-            ifile = substr(line, idx + 1)
-            insert_after[iname] = ifile
-        }
-    }
-    close(insert_map_file)
-
-    n_sp = 0
-    while ((getline line < subpkg_list_file) > 0) {
-        sp[++n_sp] = line
-    }
-    close(subpkg_list_file)
-
-    in_block = 0
-    out_n = 0
-}
-
-function buf(line) { out[++out_n] = line }
-
-function insert_from_file(fpath,    l) {
-    while ((getline l < fpath) > 0) buf(l)
-    close(fpath)
-}
-
-/^rpm\(/ {
-    in_block = 1
-    delete blk
-    blk_n = 0
-    blk[++blk_n] = $0
-    next
-}
-
-in_block {
-    blk[++blk_n] = $0
-    if ($0 == ")") {
-        in_block = 0
-
-        name = ""
-        for (i = 1; i <= blk_n; i++) {
-            if (blk[i] ~ /name = "/) {
-                name = blk[i]
-                sub(/.*name = "/, "", name)
-                sub(/".*/, "", name)
-                break
-            }
-        }
-
-        skip = 0
-        if (name ~ /\.el10nv\./) {
-            for (i = 1; i <= n_sp; i++) {
-                pat = "^" sp[i] "-[0-9]"
-                if (name ~ pat) {
-                    skip = 1
-                    break
-                }
-            }
-        }
-
-        if (skip) {
-            if (out_n > 0 && out[out_n] == "") out_n--
-        } else {
-            for (i = 1; i <= blk_n; i++) buf(blk[i])
-
-            if (name in insert_after) {
-                insert_from_file(insert_after[name])
-            }
-        }
-    }
-    next
-}
-
-{ buf($0) }
-
-END {
-    for (i = 1; i <= out_n; i++) print out[i]
-}
-' "${WORKSPACE_FILE}" >"${TMPDIR}/WORKSPACE.new"
+    -v subpkg_list_file="${subpkg_list_file}" \
+    -f "${SCRIPT_DIR}/sync-nv-rpms-update-workspace.awk" \
+    "${WORKSPACE_FILE}" >"${TMPDIR}/WORKSPACE.new"
 
 workspace_entries=$(grep -c 'name = ".*el10nv' "${TMPDIR}/WORKSPACE.new" || true)
 mv "${TMPDIR}/WORKSPACE.new" "${WORKSPACE_FILE}"
