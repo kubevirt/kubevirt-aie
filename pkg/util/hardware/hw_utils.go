@@ -39,6 +39,8 @@ const (
 	MAX_CPU_LIMIT = 50000
 )
 
+var pciAddrRegx = regexp.MustCompile(PCI_ADDRESS_PATTERN)
+
 // Parse linux cpuset into an array of ints
 // See: http://man7.org/linux/man-pages/man7/cpuset.7.html#FORMATS
 func ParseCPUSetLine(cpusetLine string, limit int) (cpusList []int, err error) {
@@ -104,10 +106,6 @@ func GetNumberOfVCPUs(cpuSpec *v1.CPU) int64 {
 
 // ParsePciAddress returns an array of PCI DBSF fields (domain, bus, slot, function)
 func ParsePciAddress(pciAddress string) ([]string, error) {
-	pciAddrRegx, err := regexp.Compile(PCI_ADDRESS_PATTERN)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile pci address pattern, %v", err)
-	}
 	res := pciAddrRegx.FindStringSubmatch(pciAddress)
 	if len(res) == 0 {
 		return nil, fmt.Errorf("failed to parse pci address %s", pciAddress)
