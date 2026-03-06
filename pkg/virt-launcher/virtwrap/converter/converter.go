@@ -67,6 +67,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/vcpu"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/virtio"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device"
+	iommupci "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/iommu-pci"
 )
 
 const (
@@ -117,6 +118,10 @@ type ConverterContext struct {
 	SerialConsoleLog                bool
 	PCINUMAAwareTopologyEnabled     bool
 	DomainAttachmentByInterfaceName map[string]string
+	// IommuPCI contains IOMMU capabilities detected from the host system.
+	// Used to configure SMMUv3 IOMMU devices and calculate PCI hole sizes
+	// for GPU passthrough on ARM64 systems.
+	IommuPCI *iommupci.IommuPCI
 }
 
 func assignDiskToSCSIController(disk *api.Disk, unit int) {

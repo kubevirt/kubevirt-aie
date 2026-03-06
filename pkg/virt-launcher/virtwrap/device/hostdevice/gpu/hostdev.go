@@ -21,12 +21,14 @@ package gpu
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "kubevirt.io/api/core/v1"
 
 	drautil "kubevirt.io/kubevirt/pkg/dra"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice"
+	iommupci "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/iommu-pci"
 )
 
 const (
@@ -35,15 +37,74 @@ const (
 	DefaultDisplayOn             = true
 )
 
-func CreateHostDevices(vmiGPUs []v1.GPU) ([]api.HostDevice, error) {
-	return CreateHostDevicesFromPools(vmiGPUs, NewPCIAddressPool(vmiGPUs), NewMDEVAddressPool(vmiGPUs))
+// newDecorateHook creates a decoration function that configures IOMMU settings
+// for GPU host devices on systems that support advanced IOMMU features.
+//
+// This function is specifically designed for NVIDIA GPU passthrough on ARM64
+// systems with SMMUv3. It performs two main configurations:
+//
+//  1. IOMMUFD driver setup: Detects if the modern IOMMUFD interface is available
+//     and configures the host device to use it instead of legacy VFIO.
+//
+//  2. ACPI NodeSet marking: On SMMUv3-enabled systems, marks devices with
+//     "tofill" so that fake NUMA nodes can be created later in the conversion
+//     pipeline.
+//
+// Parameters:
+//   - name: The GPU device name (e.g., "nvidia.com/gpu")
+//   - iommupci: IOMMU configuration and capabilities
+//
+// Returns:
+//   - A function that decorates host devices with IOMMU-specific configuration
+func newDecorateHook(name string, iommuPCI *iommupci.IommuPCI) func(hostDevice *api.HostDevice) error {
+	return func(hostDevice *api.HostDevice) error {
+		// Skip decoration if IOMMU is not configured
+		if iommuPCI == nil {
+			return nil
+		}
+
+		// Only apply to NVIDIA devices
+		if !strings.Contains(name, "nvidia.com") {
+			return nil
+		}
+
+		// Skip if device has no PCI address
+		if hostDevice.Source.Address == nil {
+			return nil
+		}
+
+		// Check if IOMMUFD (modern IOMMU interface) is enabled
+		if iommuPCI.IommufdEnabled == nil {
+			return nil
+		}
+
+		// Configure device to use IOMMUFD driver if available
+		if *iommuPCI.IommufdEnabled {
+			hostDevice.Driver = &api.HostDevDriver{
+				Iommufd: "yes",
+			}
+		}
+
+		// Mark device for fake NUMA node creation on SMMUv3 systems
+		if iommuPCI.SMMUEnabled {
+			hostDevice.ACPI = &api.ACPIHostDev{
+				NodeSet: "tofill",
+			}
+		}
+
+		return nil
+	}
 }
 
-func CreateHostDevicesFromPools(vmiGPUs []v1.GPU, pciAddressPool, mdevAddressPool hostdevice.AddressPooler) ([]api.HostDevice, error) {
+func CreateHostDevices(vmiGPUs []v1.GPU, iommupci *iommupci.IommuPCI) ([]api.HostDevice, error) {
+	return CreateHostDevicesFromPools(vmiGPUs, NewPCIAddressPool(vmiGPUs), NewMDEVAddressPool(vmiGPUs), iommupci)
+}
+
+func CreateHostDevicesFromPools(vmiGPUs []v1.GPU, pciAddressPool, mdevAddressPool hostdevice.AddressPooler, iommupci *iommupci.IommuPCI) ([]api.HostDevice, error) {
 	pciPool := hostdevice.NewBestEffortAddressPool(pciAddressPool)
 	mdevPool := hostdevice.NewBestEffortAddressPool(mdevAddressPool)
 
-	hostDevicesMetaData := createHostDevicesMetadata(vmiGPUs)
+	hostDevicesMetaData := createHostDevicesMetadata(vmiGPUs, iommupci)
 	pciHostDevices, err := hostdevice.CreatePCIHostDevices(hostDevicesMetaData, pciPool)
 	if err != nil {
 		return nil, fmt.Errorf(failedCreateGPUHostDeviceFmt, err)
@@ -62,7 +123,7 @@ func CreateHostDevicesFromPools(vmiGPUs []v1.GPU, pciAddressPool, mdevAddressPoo
 	return hostDevices, nil
 }
 
-func createHostDevicesMetadata(vmiGPUs []v1.GPU) []hostdevice.HostDeviceMetaData {
+func createHostDevicesMetadata(vmiGPUs []v1.GPU, iommupci *iommupci.IommuPCI) []hostdevice.HostDeviceMetaData {
 	var hostDevicesMetaData []hostdevice.HostDeviceMetaData
 	for _, dev := range vmiGPUs {
 		hostDevicesMetaData = append(hostDevicesMetaData, hostdevice.HostDeviceMetaData{
@@ -70,6 +131,7 @@ func createHostDevicesMetadata(vmiGPUs []v1.GPU) []hostdevice.HostDeviceMetaData
 			Name:              dev.Name,
 			ResourceName:      dev.DeviceName,
 			VirtualGPUOptions: dev.VirtualGPUOptions,
+			DecorateHook:      newDecorateHook(dev.DeviceName, iommupci),
 		})
 	}
 	return hostDevicesMetaData
