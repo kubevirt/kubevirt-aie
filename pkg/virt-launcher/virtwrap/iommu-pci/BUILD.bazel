@@ -5,13 +5,16 @@ go_library(
     srcs = [
         "checker.go",
         "checker-arm64.go",
+        "iommu-pci.go",
     ],
     cgo = True,
     importpath = "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/iommu-pci",
     visibility = ["//visibility:public"],
-    deps = select({
+    deps = [
+        "//pkg/pointer:go_default_library",
+        "//staging/src/kubevirt.io/client-go/log:go_default_library",
+    ] + select({
         "@io_bazel_rules_go//go/platform:arm64": [
-            "//staging/src/kubevirt.io/client-go/log:go_default_library",
             "//vendor/golang.org/x/sys/unix:go_default_library",
         ],
         "//conditions:default": [],
