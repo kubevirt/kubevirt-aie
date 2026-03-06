@@ -11,6 +11,7 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/util/hardware"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
+	iommupci "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/iommu-pci"
 )
 
 const (
@@ -171,12 +172,19 @@ type numaAwareTopology struct {
 	expanderBus               *api.Controller
 	rootPorts                 []*api.Controller
 	addressPerDeviceSourcePCI map[string]*api.Address
+	// iommuDev is the SMMUv3 IOMMU device configuration for this NUMA topology.
+	// On ARM64 systems with NVIDIA GPUs, each PCIe expander bus needs its own
+	// IOMMU device to provide memory isolation and address translation.
+	iommuDev *api.IOMMUDevice
 }
 
 // expanderBusAssigner manages the assignment of PCIe expander buses and
 // NUMA aligned device placement.
 type expanderBusAssigner struct {
-	domainSpec       *api.DomainSpec
+	domainSpec *api.DomainSpec
+	// iommuPCI contains IOMMU system capabilities and tracks PCI hole size
+	// requirements for devices with IOMMU support.
+	iommuPCI         *iommupci.IommuPCI
 	controllerIndex  uint32
 	controllerCount  uint32
 	topologyMap      map[uint32]*numaAwareTopology
@@ -204,12 +212,13 @@ func getCurrentControllerIndex(domainSpec *api.DomainSpec) uint32 {
 }
 
 // newExpanderBusAssigner creates a new PCIe expander bus assigner.
-func newExpanderBusAssigner(domainSpec *api.DomainSpec) *expanderBusAssigner {
+func newExpanderBusAssigner(domainSpec *api.DomainSpec, iommupci *iommupci.IommuPCI) *expanderBusAssigner {
 	currentControllerIndex := getCurrentControllerIndex(domainSpec)
 	log.Log.Infof("Current max controller index: %d", currentControllerIndex)
 
 	assigner := &expanderBusAssigner{
 		domainSpec:        domainSpec,
+		iommuPCI:          iommupci,
 		topologyMap:       make(map[uint32]*numaAwareTopology),
 		devices:           make(map[string]*api.HostDevice),
 		devicesNUMANodes:  make(map[string]uint32),
@@ -224,8 +233,8 @@ func newExpanderBusAssigner(domainSpec *api.DomainSpec) *expanderBusAssigner {
 // PlacePCIDevicesWithNUMAAlignment places PCI devices in the domainSpec with
 // NUMA alignment using PCIe expander buses. It modifies the domainSpec in place
 // or leaves it unchanged in case of an error.
-func PlacePCIDevicesWithNUMAAlignment(domainSpec *api.DomainSpec) error {
-	assigner := newExpanderBusAssigner(domainSpec)
+func PlacePCIDevicesWithNUMAAlignment(domainSpec *api.DomainSpec, iommupci *iommupci.IommuPCI) error {
+	assigner := newExpanderBusAssigner(domainSpec, iommupci)
 	return assigner.PlaceNumaAlignedDevices()
 }
 
@@ -339,6 +348,46 @@ func (a *expanderBusAssigner) placeDevice(topology *numaAwareTopology, device *a
 	sourceAddress := hardware.PCIAddressToString(device.Source.Address)
 	topology.addressPerDeviceSourcePCI[sourceAddress] = newPCIAddress(rootPort.Index, "0x00")
 
+	// If this device requires IOMMU configuration (marked with "tofill" NodeSet),
+	// create an SMMUv3 IOMMU device for the topology
+	if device.ACPI != nil && device.ACPI.NodeSet == "tofill" {
+		// Parse PCI device capabilities (ATS, PASID) from the device configuration
+		bdf, err := iommupci.NewBDFDevice(sourceAddress).ParseConfigHybrid()
+		if err != nil {
+			return fmt.Errorf("failed to parse IOMMU capabilities for %s: %w", sourceAddress, err)
+		}
+
+		oas := bdf.OASBits
+		if oas == 0 {
+			oas = 48
+		}
+
+		ssidSize := bdf.SSIDSize
+		if bdf.SSIDSize == 0 {
+			ssidSize = 20
+		}
+
+		// Create the IOMMU device with capabilities matching the physical device
+		topology.iommuDev = &api.IOMMUDevice{
+			Model: "smmuv3",
+			Driver: &api.IOMMUDriver{
+				PciBus:   topology.expanderBus.Index,        // Associate with this expander bus
+				Ats:      fromBoolToOnOff(bdf.ATSSupported), // Address Translation Services
+				Oas:      fmt.Sprintf("%d", oas),            // Output Address Size
+				Ril:      "off",                             // Range-based Invalidation
+				Accel:    "on",                              // Acceleration enabled
+				SSIDSize: fmt.Sprintf("%d", ssidSize),
+			},
+		}
+
+		// Calculate and accumulate the PCI hole size needed for device BARs
+		size, err := bdf.CalculatePCIHoleSize()
+		if err != nil {
+			return err
+		}
+		a.iommuPCI.PCIHoleSize += size
+	}
+
 	return nil
 }
 
@@ -400,7 +449,20 @@ func (a *expanderBusAssigner) PlaceNumaAlignedDevices() error {
 			// affinity information), we leave it unmodified so that it can be
 			// placed by the root slot assigner.
 		}
+		if topology.iommuDev != nil {
+			a.domainSpec.Devices.IOMMU = append(a.domainSpec.Devices.IOMMU, *topology.iommuDev)
+		}
 	}
 
 	return nil
+}
+
+// fromBoolToOnOff converts a boolean value to libvirt's "on"/"off" string format.
+// This is used for IOMMU driver configuration where libvirt expects string values
+// rather than boolean types.
+func fromBoolToOnOff(value bool) string {
+	if value {
+		return "on"
+	}
+	return "off"
 }
