@@ -91,6 +91,13 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 
 		testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kvConfig)
 	}
+	enableFeatureGatesWithDefaultArchitecture := func(defaultArchitecture string, featureGates ...string) {
+		kvConfig := kv.DeepCopy()
+		kvConfig.Spec.Configuration.DeveloperConfiguration.FeatureGates = append(featureGates, featuregate.MultiArchitecture)
+		kvConfig.Status.DefaultArchitecture = defaultArchitecture
+
+		testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kvConfig)
+	}
 
 	AfterEach(func() {
 		disableFeatureGates()
@@ -454,6 +461,10 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 				map[string]string{hooks.HookSidecarListAnnotationName: "[{'image': 'fake-image'}]"},
 				fmt.Sprintf("invalid entry metadata.annotations.%s", hooks.HookSidecarListAnnotationName),
 			),
+			Entry("without GraceIOVirtualization feature gate enabled",
+				map[string]string{v1.GraceVirtualizationAnnotation: `{}`},
+				fmt.Sprintf("invalid entry metadata.annotations.%s", v1.GraceVirtualizationAnnotation),
+			),
 		)
 
 		DescribeTable("should accept annotations which require feature gate enabled", func(annotations map[string]string, featureGate string) {
@@ -478,6 +489,88 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 				featuregate.SidecarGate,
 			),
 		)
+
+		It("should accept GraceIOVirtualization annotation when feature gate is enabled for arm64", func() {
+			enableFeatureGatesWithDefaultArchitecture("arm64", featuregate.GraceIOVirtualization)
+			vmi := newBaseVmi()
+			vmi.Spec.Architecture = "arm64"
+			vmi.Annotations = map[string]string{v1.GraceVirtualizationAnnotation: `{}`}
+
+			ar, err := newAdmissionReviewForVMICreation(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			ar.Request.UserInfo = authv1.UserInfo{Username: "fake-account"}
+
+			resp := vmiCreateAdmitter.Admit(context.Background(), ar)
+			Expect(resp.Allowed).To(BeTrue())
+			Expect(resp.Result).To(BeNil())
+		})
+
+		It("should accept valid GraceIOVirtualization subfeature options", func() {
+			enableFeatureGatesWithDefaultArchitecture("arm64", featuregate.GraceIOVirtualization)
+			vmi := newBaseVmi()
+			vmi.Spec.Architecture = "arm64"
+			vmi.Annotations = map[string]string{v1.GraceVirtualizationAnnotation: `{"smmuv3":true,"vcmdq":true,"egm":true}`}
+
+			ar, err := newAdmissionReviewForVMICreation(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			ar.Request.UserInfo = authv1.UserInfo{Username: "fake-account"}
+
+			resp := vmiCreateAdmitter.Admit(context.Background(), ar)
+			Expect(resp.Allowed).To(BeTrue())
+			Expect(resp.Result).To(BeNil())
+		})
+
+		It("should reject GraceIOVirtualization annotation when effective architecture is not arm64", func() {
+			enableFeatureGatesWithDefaultArchitecture("amd64", featuregate.GraceIOVirtualization)
+			vmi := newBaseVmi()
+			vmi.Annotations = map[string]string{v1.GraceVirtualizationAnnotation: `{}`}
+
+			ar, err := newAdmissionReviewForVMICreation(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			ar.Request.UserInfo = authv1.UserInfo{Username: "fake-account"}
+
+			resp := vmiCreateAdmitter.Admit(context.Background(), ar)
+			Expect(resp.Allowed).To(BeFalse())
+			Expect(resp.Result.Details.Causes).To(HaveLen(1))
+			Expect(resp.Result.Details.Causes[0].Type).To(Equal(metav1.CauseTypeFieldValueInvalid))
+			Expect(resp.Result.Details.Causes[0].Field).To(Equal("spec.architecture"))
+			Expect(resp.Result.Details.Causes[0].Message).To(ContainSubstring("GraceIOVirtualization requires arm64 architecture"))
+		})
+
+		DescribeTable("should reject invalid grace virtualization annotation payloads", func(payload, expectedMsg string) {
+			enableFeatureGatesWithDefaultArchitecture("arm64", featuregate.GraceIOVirtualization)
+			vmi := newBaseVmi()
+			vmi.Spec.Architecture = "arm64"
+			vmi.Annotations = map[string]string{v1.GraceVirtualizationAnnotation: payload}
+
+			ar, err := newAdmissionReviewForVMICreation(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			ar.Request.UserInfo = authv1.UserInfo{Username: "fake-account"}
+
+			resp := vmiCreateAdmitter.Admit(context.Background(), ar)
+			Expect(resp.Allowed).To(BeFalse())
+			Expect(resp.Result.Details.Causes).To(HaveLen(1))
+			Expect(resp.Result.Details.Causes[0].Type).To(Equal(metav1.CauseTypeFieldValueInvalid))
+			Expect(resp.Result.Details.Causes[0].Message).To(ContainSubstring(expectedMsg))
+		},
+			Entry("invalid JSON",
+				`{"smmuv3":true`,
+				"failed to parse annotation value",
+			),
+			Entry("unknown field",
+				`{"hostDevices":true}`,
+				"failed to parse annotation value",
+			),
+			Entry("vcmdq requires smmuv3",
+				`{"vcmdq":true,"smmuv3":false}`,
+				"vcmdq requires smmuv3=true",
+			),
+			Entry("egm requires smmuv3",
+				`{"egm":true,"smmuv3":false}`,
+				"egm requires smmuv3=true",
+			),
+		)
+
 	})
 
 	Context("with VirtualMachineInstance spec", func() {

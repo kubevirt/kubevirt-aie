@@ -48,6 +48,7 @@ import (
 	storageadmitters "kubevirt.io/kubevirt/pkg/storage/admitters"
 	"kubevirt.io/kubevirt/pkg/storage/reservation"
 	"kubevirt.io/kubevirt/pkg/storage/types"
+	"kubevirt.io/kubevirt/pkg/util"
 	hwutil "kubevirt.io/kubevirt/pkg/util/hardware"
 	webhookutils "kubevirt.io/kubevirt/pkg/util/webhooks"
 	"kubevirt.io/kubevirt/pkg/virt-api/webhooks"
@@ -127,6 +128,13 @@ func (admitter *VMICreateAdmitter) Admit(_ context.Context, ar *admissionv1.Admi
 
 	_, isKubeVirtServiceAccount := admitter.KubeVirtServiceAccounts[ar.Request.UserInfo.Username]
 	causes = append(causes, ValidateVirtualMachineInstanceMetadata(k8sfield.NewPath("metadata"), &vmi.ObjectMeta, admitter.ClusterConfig, isKubeVirtServiceAccount)...)
+	causes = append(causes, validateGraceVirtualizationAnnotation(
+		k8sfield.NewPath("metadata"),
+		k8sfield.NewPath("spec"),
+		vmi.Annotations,
+		&vmi.Spec,
+		admitter.ClusterConfig,
+	)...)
 	causes = append(causes, webhooks.ValidateVirtualMachineInstanceHyperv(k8sfield.NewPath("spec").Child("domain").Child("features").Child("hyperv"), &vmi.Spec)...)
 	causes = append(causes, ValidateVirtualMachineInstancePerArch(k8sfield.NewPath("spec"), &vmi.Spec)...)
 	if len(causes) > 0 {
@@ -1243,6 +1251,73 @@ func ValidateVirtualMachineInstanceMetadata(field *k8sfield.Path, metadata *meta
 	}
 
 	return causes
+}
+
+func validateGraceVirtualizationAnnotation(metadataField, specField *k8sfield.Path, annotations map[string]string, spec *v1.VirtualMachineInstanceSpec, config *virtconfig.ClusterConfig) []metav1.StatusCause {
+	if len(annotations) == 0 {
+		return nil
+	}
+
+	var causes []metav1.StatusCause
+	annotationPath := metadataField.Child("annotations").Child(v1.GraceVirtualizationAnnotation).String()
+	rawConfig := strings.TrimSpace(annotations[v1.GraceVirtualizationAnnotation])
+	if rawConfig == "" {
+		return causes
+	}
+
+	if !config.GraceIOVirtualizationEnabled() {
+		causes = append(causes, metav1.StatusCause{
+			Type: metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("GraceIOVirtualization feature gate is not enabled in kubevirt-config, invalid entry %s",
+				annotationPath),
+			Field: metadataField.Child("annotations").String(),
+		})
+		return causes
+	}
+
+	if effectiveArchitecture(spec, config) != "arm64" {
+		causes = append(causes, metav1.StatusCause{
+			Type:    metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: GraceIOVirtualization requires arm64 architecture", annotationPath),
+			Field:   specField.Child("architecture").String(),
+		})
+		return causes
+	}
+
+	cfg, err := util.ParseGraceVirtualizationConfigStrict(rawConfig)
+	if err != nil {
+		causes = append(causes, metav1.StatusCause{
+			Type: metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: failed to parse annotation value: %v",
+				annotationPath, err),
+			Field: metadataField.Child("annotations").String(),
+		})
+		return causes
+	}
+
+	if util.GraceFieldEnabled(cfg.VCMDQ) && !util.GraceFieldEnabled(cfg.SMMUv3) {
+		causes = append(causes, metav1.StatusCause{
+			Type:    metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: vcmdq requires smmuv3=true", annotationPath),
+			Field:   metadataField.Child("annotations").String(),
+		})
+	}
+	if util.GraceFieldEnabled(cfg.EGM) && !util.GraceFieldEnabled(cfg.SMMUv3) {
+		causes = append(causes, metav1.StatusCause{
+			Type:    metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: egm requires smmuv3=true", annotationPath),
+			Field:   metadataField.Child("annotations").String(),
+		})
+	}
+
+	return causes
+}
+
+func effectiveArchitecture(spec *v1.VirtualMachineInstanceSpec, config *virtconfig.ClusterConfig) string {
+	if spec != nil && spec.Architecture != "" {
+		return spec.Architecture
+	}
+	return config.GetDefaultArchitecture()
 }
 
 // Copied from kubernetes/pkg/apis/core/validation/validation.go

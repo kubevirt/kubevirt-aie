@@ -219,6 +219,13 @@ func ValidateVirtualMachineSpec(field *k8sfield.Path, spec *v1.VirtualMachineSpe
 
 	causes = append(causes, ValidateVirtualMachineInstanceMetadata(field.Child("template", "metadata"), &spec.Template.ObjectMeta, config, isKubeVirtServiceAccount)...)
 	causes = append(causes, ValidateVirtualMachineInstanceSpec(field.Child("template", "spec"), &spec.Template.Spec, config)...)
+	causes = append(causes, validateGraceVirtualizationAnnotation(
+		field.Child("template", "metadata"),
+		field.Child("template", "spec"),
+		spec.Template.ObjectMeta.Annotations,
+		&spec.Template.Spec,
+		config,
+	)...)
 
 	causes = append(causes, storageadmitters.ValidateDataVolumeTemplate(field, spec)...)
 	causes = append(causes, validateRunStrategy(field, spec, config)...)

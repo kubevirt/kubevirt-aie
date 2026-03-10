@@ -160,6 +160,10 @@ const (
 	// detection by nvidia-smi, NCCL, and other GPU-aware software, allowing optimal GPU-to-GPU and
 	// GPU-to-NIC communication paths for distributed training workloads on HGX and GB200 systems.
 	PCINUMAAwareTopology = "PCINUMAAwareTopology"
+
+	// GraceIOVirtualization enables alpha annotation-driven controls for Grace/Blackwell virtualization
+	// features (such as SMMUv3, vCMDQ and vEGM intent) without introducing new VMI API fields.
+	GraceIOVirtualization = "GraceIOVirtualization"
 )
 
 func init() {
@@ -198,4 +202,5 @@ func init() {
 	RegisterFeatureGate(FeatureGate{Name: IncrementalBackupGate, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: MigrationPriorityQueue, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: PCINUMAAwareTopology, State: Alpha})
+	RegisterFeatureGate(FeatureGate{Name: GraceIOVirtualization, State: Alpha})
 }

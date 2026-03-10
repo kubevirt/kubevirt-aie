@@ -228,3 +228,7 @@ func (config *ClusterConfig) MigrationPriorityQueueEnabled() bool {
 func (config *ClusterConfig) PCINUMAAwareTopologyEnabled() bool {
 	return config.isFeatureGateEnabled(featuregate.PCINUMAAwareTopology)
 }
+
+func (config *ClusterConfig) GraceIOVirtualizationEnabled() bool {
+	return config.isFeatureGateEnabled(featuregate.GraceIOVirtualization)
+}

@@ -1416,6 +1416,24 @@ const (
 	// For example, 4294967296 configures a 4TiB hole.
 	PCIHole64Size string = "alpha.kubevirt.io/pciHole64Size"
 
+	// GraceVirtualizationAnnotation carries alpha, feature-gated Grace/Blackwell virtualization settings as JSON.
+	// This annotation is a temporary experimental opt-in while the implementation is validated, and may later be
+	// replaced by topology/device inference or typed API fields.
+	//
+	// A non-empty annotation value opts the VMI into baseline Grace-specific wiring for passthrough PCI devices
+	// already assigned to the VMI; it does not request devices or replace permittedHostDevices/device-plugin configuration.
+	//
+	// Supported optional keys:
+	// - smmuv3 requests SMMUv3 IOMMU wiring.
+	// - vcmdq requests vCMDQ acceleration; requires smmuv3=true.
+	// - egm requests EGM wiring; requires smmuv3=true.
+	//
+	// Omit the annotation entirely for ordinary VMI behavior. Use {} to request only baseline Grace host-device
+	// wiring; in that case smmuv3, vcmdq, and egm all default to false. The annotation requires the
+	// GraceIOVirtualization feature gate and an arm64 VMI.
+	// Example: {"smmuv3":true,"vcmdq":false,"egm":false}
+	GraceVirtualizationAnnotation string = "alpha.kubevirt.io/graceVirtualization"
+
 	// EvictionSourceAnnotation indicates the origin of an api initiated eviction in the VirtualMachineInstance.
 	// This annotation might be empty if the source is not a recognized actor (an admin for example).
 	// This could be useful to distinguish evictions originated from the descheduler.
