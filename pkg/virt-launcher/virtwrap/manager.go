@@ -1099,6 +1099,7 @@ func (l *LibvirtDomainManager) generateConverterContext(vmi *v1.VirtualMachineIn
 			c.FreePageReporting = isFreePageReportingEnabled(options.GetClusterConfig().GetFreePageReportingDisabled(), vmi)
 			c.BochsForEFIGuests = options.GetClusterConfig().GetBochsDisplayForEFIGuests()
 			c.SerialConsoleLog = isSerialConsoleLogEnabled(options.GetClusterConfig().GetSerialConsoleLogDisabled(), vmi)
+			c.PCINUMAAwareTopologyEnabled = options.GetClusterConfig().GetPCINUMAAwareTopologyEnabled()
 		}
 
 		c.DomainAttachmentByInterfaceName = options.GetInterfaceDomainAttachment()
@@ -1516,6 +1517,10 @@ func (l *LibvirtDomainManager) allocateHotplugPorts(
 ) (cli.VirDomain, error) {
 	logger := log.Log.Object(vmi)
 
+	if domainSpec == nil {
+		return nil, fmt.Errorf("domain spec is nil")
+	}
+
 	if !defaults.SupportsPCIeHotplug(vmi.Spec.Architecture) {
 		logger.Infof("Skipping hotplug port allocation: architecture %s does not use PCIe topology", vmi.Spec.Architecture)
 		return l.setDomainSpecWithHooks(vmi, domainSpec)
@@ -1535,28 +1540,73 @@ func (l *LibvirtDomainManager) allocateHotplugPorts(
 		placeholderCount, extraControllers, domainSpec.Memory.Value, domainSpec.Memory.Unit)
 
 	setDomainFn := func(v *v1.VirtualMachineInstance, s *api.DomainSpec) (cli.VirDomain, error) {
+		normalizeHotplugRootPortAddresses(s)
 		return l.setDomainSpecWithHooks(v, s)
 	}
 
-	dom, err := network.WithNetworkIfacesResources(vmi, domainSpec, placeholderCount, setDomainFn)
-	if err != nil {
-		return nil, err
+	baseSpec := domainSpec.DeepCopy()
+	if baseSpec == nil {
+		return nil, fmt.Errorf("failed to copy domain spec")
 	}
 
-	// Extra controllers must be added AFTER WithNetworkIfacesResources so
-	// that libvirt has already assigned devices to root ports. Controllers
-	// appended here get indices above the occupied ports and remain empty,
-	// providing genuine hotplug capacity.
-	if extraControllers > 0 {
-		appendPCIeRootPortControllers(domainSpec, extraControllers)
-		dom.Free()
-		dom, err = l.setDomainSpecWithHooks(vmi, domainSpec)
-		if err != nil {
+	requestedPorts := placeholderCount + extraControllers
+	observedSlotExhaustion := false
+	for ports := requestedPorts; ports >= 0; ports-- {
+		if ports != requestedPorts {
+			logger.Warningf("Retrying hotplug port allocation with %d total ports due to root bus slot exhaustion", ports)
+		}
+
+		currentSpec := baseSpec.DeepCopy()
+		if currentSpec == nil {
+			return nil, fmt.Errorf("failed to copy domain spec for retry")
+		}
+
+		placeholders := placeholderCount
+		if placeholders > ports {
+			placeholders = ports
+		}
+		directControllers := ports - placeholders
+
+		// leverage existing hotplug nic code to allocate ports
+		// should work for disks and any other devices as well
+		dom, err := withNetworkIfacesResources(vmi, currentSpec, placeholders, setDomainFn)
+		if err == nil {
+			if directControllers > 0 {
+				// Extra controllers must be added AFTER WithNetworkIfacesResources so
+				// that libvirt has already assigned devices to root ports. Controllers
+				// appended here get indices above the occupied ports and remain empty,
+				// providing genuine hotplug capacity.
+				appendPCIeRootPortControllers(currentSpec, directControllers)
+				if dom != nil {
+					dom.Free()
+				}
+				dom, err = setDomainFn(vmi, currentSpec)
+			}
+		}
+
+		if err == nil {
+			*domainSpec = *currentSpec
+			if ports < requestedPorts {
+				logger.V(1).Infof("Continuing with %d hotplug ports after libvirt slot exhaustion", ports)
+			}
+			return dom, nil
+		}
+
+		slotExhaustion := isRootPortSlotExhaustionError(err)
+		if slotExhaustion {
+			observedSlotExhaustion = true
+		}
+		connectionIssue := observedSlotExhaustion && isLibvirtConnectionError(err)
+		if connectionIssue && !slotExhaustion {
+			logger.Warningf("Libvirt connection issue while retrying hotplug port allocation: %v", err)
+		}
+
+		if ports == 0 || (!slotExhaustion && !connectionIssue) {
 			return nil, err
 		}
 	}
 
-	return dom, nil
+	return nil, fmt.Errorf("failed to allocate hotplug ports")
 }
 
 // calculatePlaceholderCount determines how many placeholder interfaces to use.
@@ -1639,7 +1689,10 @@ func getSourceFile(disk api.Disk) string {
 	return file
 }
 
-var checkIfDiskReadyToUse = checkIfDiskReadyToUseFunc
+var (
+	checkIfDiskReadyToUse      = checkIfDiskReadyToUseFunc
+	withNetworkIfacesResources = network.WithNetworkIfacesResources
+)
 
 func checkIfDiskReadyToUseFunc(filename string) (bool, error) {
 	info, err := os.Stat(filename)
@@ -2424,7 +2477,11 @@ func (l *LibvirtDomainManager) getDomainDirtyRateStats(calculationDuration time.
 }
 
 func formatPCIAddressStr(address *api.Address) string {
-	return fmt.Sprintf("%s:%s:%s.%s", address.Domain[2:], address.Bus[2:], address.Slot[2:], address.Function[2:])
+	formatted, err := hardware.FormatPCIAddress(address)
+	if err != nil {
+		return ""
+	}
+	return formatted
 }
 
 func addToDeviceMetadata(metadataType cloudinit.DeviceMetadataType, address *api.Address, mac string, tag string, devicesMetadata []cloudinit.DeviceData, numa *uint32, numaAlignedCPUs []uint32) []cloudinit.DeviceData {
@@ -2940,8 +2997,18 @@ func calculateHotplugPortCountV1(vmi *v1.VirtualMachineInstance) int {
 	return max(0, 4-len(interfaces))
 }
 
+func calculateHotplugPortCount(vmi *v1.VirtualMachineInstance, domainSpec *api.DomainSpec) (int, error) {
+	return calculateHotplugPortCountV2(vmi, domainSpec)
+}
+
 func calculateHotplugPortCountV2(vmi *v1.VirtualMachineInstance, domainSpec *api.DomainSpec) (int, error) {
 	if vmi.Annotations[v1.PlacePCIDevicesOnRootComplex] == "true" {
+		return 0, nil
+	}
+
+	// When NUMA host device topology is active, disable hotplug to avoid PCI slot conflicts
+	if hasNUMAHostDeviceTopology(vmi, domainSpec) {
+		log.Log.Object(vmi).V(1).Info("Disabling hotplug ports due to active NUMA host device topology")
 		return 0, nil
 	}
 
@@ -2958,5 +3025,253 @@ func calculateHotplugPortCountV2(vmi *v1.VirtualMachineInstance, domainSpec *api
 		return 0, err
 	}
 
-	return max(defaultTotalPorts-portsInUse, minFreePorts), nil
+	existingHotplug := countExistingHotplugRootPorts(domainSpec)
+
+	effectivePortsInUse := portsInUse - existingHotplug
+	if effectivePortsInUse < 0 {
+		effectivePortsInUse = 0
+	}
+
+	requested := defaultTotalPorts - effectivePortsInUse
+	if requested < minFreePorts {
+		requested = minFreePorts
+	}
+	requested -= existingHotplug
+	if requested < 0 {
+		requested = 0
+	}
+
+	availableSlots := availableRootHotplugSlots(domainSpec)
+	if requested > availableSlots {
+		log.Log.Object(vmi).V(1).Infof("Limiting hotplug root ports to %d due to root bus capacity (requested %d)", availableSlots, requested)
+		requested = availableSlots
+	}
+
+	return requested, nil
+}
+
+const (
+	rootHotplugBusHex             = "0x00"
+	rootHotplugDomainHex          = "0x0000"
+	rootHotplugSlotStart          = 0x10
+	rootReservedSlotDefaultBridge = 0x01
+	rootReservedSlotICH9Sound     = 0x1b
+	rootReservedSlotSATA          = 0x1f
+)
+
+func countExistingHotplugRootPorts(spec *api.DomainSpec) int {
+	if spec == nil {
+		return 0
+	}
+	count := 0
+	for _, ctrl := range spec.Devices.Controllers {
+		if ctrl.Model != "pcie-root-port" || ctrl.Alias == nil {
+			continue
+		}
+		alias := ctrl.Alias.GetName()
+		if isHotplugRootPortAlias(alias) || hostdevice.IsNUMARootPortAlias(alias) {
+			count++
+		}
+	}
+	return count
+}
+
+func availableRootHotplugSlots(spec *api.DomainSpec) int {
+	usedSlots := map[int]struct{}{
+		rootReservedSlotDefaultBridge: {},
+		rootReservedSlotICH9Sound:     {},
+		rootReservedSlotSATA:          {},
+	}
+
+	unassignedHotplugPorts := 0
+
+	if spec != nil {
+		for i := range spec.Devices.Controllers {
+			ctrl := spec.Devices.Controllers[i]
+			if ctrl.Address == nil {
+				if ctrl.Model == "pcie-root-port" && ctrl.Alias != nil && isHotplugRootPortAlias(ctrl.Alias.GetName()) {
+					unassignedHotplugPorts++
+				}
+				continue
+			}
+			bus, err := parseHexByte(ctrl.Address.Bus)
+			if err != nil || bus != 0 {
+				continue
+			}
+			slot, err := parseHexByte(ctrl.Address.Slot)
+			if err != nil {
+				if ctrl.Model == "pcie-root-port" && ctrl.Alias != nil && isHotplugRootPortAlias(ctrl.Alias.GetName()) {
+					unassignedHotplugPorts++
+				}
+				continue
+			}
+			usedSlots[slot] = struct{}{}
+		}
+	}
+
+	available := 0
+	for slot := rootHotplugSlotStart; slot <= rootReservedSlotSATA; slot++ {
+		if isRootHotplugSlotAvailable(slot, usedSlots) {
+			available++
+		}
+	}
+
+	if available <= unassignedHotplugPorts {
+		return 0
+	}
+	return available - unassignedHotplugPorts
+}
+
+func normalizeHotplugRootPortAddresses(spec *api.DomainSpec) {
+	if spec == nil {
+		return
+	}
+
+	usedSlots := map[int]struct{}{
+		rootReservedSlotDefaultBridge: {},
+		rootReservedSlotICH9Sound:     {},
+		rootReservedSlotSATA:          {},
+	}
+
+	controllers := spec.Devices.Controllers
+	for i := range controllers {
+		ctrl := controllers[i]
+		if ctrl.Address == nil {
+			continue
+		}
+		bus, err := parseHexByte(ctrl.Address.Bus)
+		if err != nil || bus != 0 {
+			continue
+		}
+		if ctrl.Model == "pcie-root-port" && ctrl.Alias != nil && isHotplugRootPortAlias(ctrl.Alias.GetName()) {
+			continue
+		}
+		slot, err := parseHexByte(ctrl.Address.Slot)
+		if err != nil {
+			continue
+		}
+		usedSlots[slot] = struct{}{}
+	}
+
+	nextSlot := rootHotplugSlotStart
+
+	for i := range controllers {
+		ctrl := &spec.Devices.Controllers[i]
+		if ctrl.Model != "pcie-root-port" || ctrl.Alias == nil {
+			continue
+		}
+		if !isHotplugRootPortAlias(ctrl.Alias.GetName()) {
+			continue
+		}
+
+		if ctrl.Address == nil {
+			ctrl.Address = &api.Address{}
+		}
+
+		ctrl.Address.Domain = rootHotplugDomainHex
+		ctrl.Address.Bus = rootHotplugBusHex
+
+		slot, err := parseHexByte(ctrl.Address.Slot)
+		if err != nil || !isRootHotplugSlotAvailable(slot, usedSlots) {
+			slot = nextAvailableRootHotplugSlot(nextSlot, usedSlots)
+		}
+		ctrl.Address.Slot = fmt.Sprintf("0x%02x", slot)
+		ctrl.Address.Function = "0x0"
+		usedSlots[slot] = struct{}{}
+		if slot >= nextSlot {
+			nextSlot = slot + 1
+		}
+	}
+}
+
+func parseHexByte(value string) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return -1, fmt.Errorf("empty value")
+	}
+	if strings.HasPrefix(trimmed, "0x") || strings.HasPrefix(trimmed, "0X") {
+		v, err := strconv.ParseInt(trimmed[2:], 16, 32)
+		return int(v), err
+	}
+	v, err := strconv.ParseInt(trimmed, 16, 32)
+	return int(v), err
+}
+
+func isRootHotplugSlotAvailable(slot int, used map[int]struct{}) bool {
+	if slot < 0 {
+		return false
+	}
+	if slot == rootReservedSlotDefaultBridge || slot == rootReservedSlotICH9Sound || slot == rootReservedSlotSATA {
+		return false
+	}
+	if _, taken := used[slot]; taken {
+		return false
+	}
+	return true
+}
+
+func nextAvailableRootHotplugSlot(start int, used map[int]struct{}) int {
+	if start < rootHotplugSlotStart {
+		start = rootHotplugSlotStart
+	}
+	for slot := start; slot <= rootReservedSlotSATA; slot++ {
+		if isRootHotplugSlotAvailable(slot, used) {
+			return slot
+		}
+	}
+	for slot := rootHotplugSlotStart; slot < start; slot++ {
+		if isRootHotplugSlotAvailable(slot, used) {
+			return slot
+		}
+	}
+	return start
+}
+
+func isHotplugRootPortAlias(alias string) bool {
+	return hostdevice.IsHotplugRootPortAlias(alias)
+}
+
+const pciRootPortExhaustionMessage = "a PCI slot is needed to connect a PCI controller model='pcie-root-port'"
+
+func isRootPortSlotExhaustionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), pciRootPortExhaustionMessage)
+}
+
+// hasNUMAHostDeviceTopology checks if NUMA host device topology is active
+func hasNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domainSpec *api.DomainSpec) bool {
+	// Check if NUMA CPU passthrough is enabled (required for NUMA host device topology)
+	if vmi.Spec.Domain.CPU == nil ||
+		vmi.Spec.Domain.CPU.NUMA == nil ||
+		vmi.Spec.Domain.CPU.NUMA.GuestMappingPassthrough == nil {
+		return false
+	}
+
+	// Check if there are host devices present
+	if domainSpec == nil || len(domainSpec.Devices.HostDevices) == 0 {
+		return false
+	}
+
+	// Check if any PXB controllers exist (indicates NUMA topology was applied)
+	for _, ctrl := range domainSpec.Devices.Controllers {
+		if ctrl.Model == "pcie-expander-bus" && ctrl.Alias != nil {
+			if strings.HasPrefix(ctrl.Alias.GetName(), "numa-pxb") {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func isLibvirtConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection error") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "transport endpoint is not connected")
 }

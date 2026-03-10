@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	v1 "kubevirt.io/api/core/v1"
+	"kubevirt.io/client-go/log"
 
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
@@ -129,6 +130,25 @@ func (p *pciRootSlotAssigner) PlacePCIDeviceAtNextSlot(address *api.Address) (*a
 
 	// keep explicit requests for pci addresses
 	if address.Domain != "" {
+		// For NUMA-aware devices, only assign slot if not already set
+		if address.Slot == "" {
+			if address.Bus != "0x00" {
+				// Fallback for non-root NUMA buses: the NUMA planner should have
+				// assigned slots already. If we reach here, use a default slot and
+				// log a warning so we can detect unexpected code paths.
+				log.Log.Warningf("NUMA device on bus %s missing slot assignment, using fallback slot 0x06", address.Bus)
+				address.Slot = "0x06"
+				address.Function = "0x0"
+			} else {
+				// Root bus uses standard slot allocation
+				slot, err := p.nextSlot()
+				if err != nil {
+					return nil, err
+				}
+				address.Slot = fmt.Sprintf("%#02x", slot)
+				address.Function = "0x0"
+			}
+		}
 		return address, nil
 	}
 

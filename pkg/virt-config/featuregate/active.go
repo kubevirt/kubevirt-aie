@@ -151,6 +151,15 @@ const (
 	// Alpha: v1.7.0
 	//
 	MigrationPriorityQueue = "MigrationPriorityQueue"
+	// Owner: sig-compute / @fanzhangio
+	// Alpha: v1.7.0
+	//
+	// PCINUMAAwareTopology enables PCIe switch topology passthrough for NUMA-aware GPU/accelerator devices.
+	// When enabled, VMs with NUMA CPU passthrough will have their passthrough devices organized into
+	// PCIe switch hierarchies that mirror the physical server topology. This enables proper PCIe topology
+	// detection by nvidia-smi, NCCL, and other GPU-aware software, allowing optimal GPU-to-GPU and
+	// GPU-to-NIC communication paths for distributed training workloads on HGX and GB200 systems.
+	PCINUMAAwareTopology = "PCINUMAAwareTopology"
 )
 
 func init() {
@@ -188,4 +197,5 @@ func init() {
 	RegisterFeatureGate(FeatureGate{Name: PasstIPStackMigration, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: IncrementalBackupGate, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: MigrationPriorityQueue, State: Alpha})
+	RegisterFeatureGate(FeatureGate{Name: PCINUMAAwareTopology, State: Alpha})
 }

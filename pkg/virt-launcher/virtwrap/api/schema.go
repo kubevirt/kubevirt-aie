@@ -642,10 +642,23 @@ type Controller struct {
 	Type      string            `xml:"type,attr"`
 	Index     string            `xml:"index,attr"`
 	Model     string            `xml:"model,attr,omitempty"`
+	ModelInfo *ControllerModel  `xml:"model,omitempty"`
+	Target    *ControllerTarget `xml:"target,omitempty"`
 	Driver    *ControllerDriver `xml:"driver,omitempty"`
 	Alias     *Alias            `xml:"alias,omitempty"`
 	Address   *Address          `xml:"address,omitempty"`
 	PCIHole64 *PCIHole64        `xml:"pcihole64,omitempty"`
+}
+
+type ControllerModel struct {
+	Name string `xml:"name,attr,omitempty"`
+}
+
+type ControllerTarget struct {
+	Chassis string `xml:"chassis,attr,omitempty"`
+	Port    string `xml:"port,attr,omitempty"`
+	BusNr   string `xml:"busNr,attr,omitempty"`
+	Node    *int   `xml:"node,omitempty"`
 }
 
 // END Controller -----------------------------
@@ -1161,19 +1174,20 @@ type GraphicsListen struct {
 }
 
 type Address struct {
-	Type       string `xml:"type,attr"`
-	Domain     string `xml:"domain,attr,omitempty"`
-	Bus        string `xml:"bus,attr"`
-	Slot       string `xml:"slot,attr,omitempty"`
-	Function   string `xml:"function,attr,omitempty"`
-	Controller string `xml:"controller,attr,omitempty"`
-	Target     string `xml:"target,attr,omitempty"`
-	Unit       string `xml:"unit,attr,omitempty"`
-	UUID       string `xml:"uuid,attr,omitempty"`
-	Device     string `xml:"device,attr,omitempty"`
-	CSSID      string `xml:"cssid,attr,omitempty"`
-	SSID       string `xml:"ssid,attr,omitempty"`
-	DevNo      string `xml:"devno,attr,omitempty"`
+	Type          string `xml:"type,attr"`
+	Domain        string `xml:"domain,attr,omitempty"`
+	Bus           string `xml:"bus,attr,omitempty"`
+	Slot          string `xml:"slot,attr,omitempty"`
+	Function      string `xml:"function,attr,omitempty"`
+	Controller    string `xml:"controller,attr,omitempty"`
+	Target        string `xml:"target,attr,omitempty"`
+	Unit          string `xml:"unit,attr,omitempty"`
+	UUID          string `xml:"uuid,attr,omitempty"`
+	Device        string `xml:"device,attr,omitempty"`
+	CSSID         string `xml:"cssid,attr,omitempty"`
+	SSID          string `xml:"ssid,attr,omitempty"`
+	DevNo         string `xml:"devno,attr,omitempty"`
+	MultiFunction string `xml:"multifunction,attr,omitempty"`
 }
 
 //END Video -------------------

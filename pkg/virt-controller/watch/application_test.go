@@ -304,6 +304,11 @@ var _ = Describe("Application", func() {
 			app.reInitChan = make(chan string, 10)
 			app.hasCDI = hasCDIAtInit
 
+			// Remove CDI if it was added by default setup and we don't want it initially
+			if !hasCDIAtInit {
+				testutils.RemoveDataVolumeAPI(crdInformer)
+			}
+
 			app.clusterConfig.SetConfigModifiedCallback(app.configModificationCallback)
 
 			if addCrd {

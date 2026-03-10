@@ -4013,6 +4013,100 @@ var _ = Describe("calculateHotplugPortCountV1", func() {
 	)
 })
 
+var _ = Describe("allocateHotplugPorts", func() {
+	var (
+		manager                *LibvirtDomainManager
+		originalWithNetworkIfc func(*v1.VirtualMachineInstance, *api.DomainSpec, int, func(*v1.VirtualMachineInstance, *api.DomainSpec) (cli.VirDomain, error)) (cli.VirDomain, error)
+	)
+
+	newDomainSpec := func(numDevices int) *api.DomainSpec {
+		spec := &api.DomainSpec{}
+		for i := 0; i < numDevices; i++ {
+			spec.Devices.Disks = append(spec.Devices.Disks, api.Disk{
+				Target: api.DiskTarget{
+					Bus: v1.DiskBusVirtio,
+				},
+			})
+		}
+		return spec
+	}
+
+	BeforeEach(func() {
+		manager = &LibvirtDomainManager{}
+		originalWithNetworkIfc = withNetworkIfacesResources
+	})
+
+	AfterEach(func() {
+		withNetworkIfacesResources = originalWithNetworkIfc
+	})
+
+	It("retries from a clean domain spec after root port exhaustion", func() {
+		vmi := newVMI("testns", "kubevirt")
+		vmi.Spec.Domain.Devices.Interfaces = nil
+		vmi.Annotations = map[string]string{
+			v1.PciInterfaceSlotCountAnnotation: "20",
+		}
+		domainSpec := newDomainSpec(0)
+
+		controllersSeen := []int{}
+		portsTried := []int{}
+		attempt := 0
+
+		withNetworkIfacesResources = func(_ *v1.VirtualMachineInstance, spec *api.DomainSpec, ports int, _ func(*v1.VirtualMachineInstance, *api.DomainSpec) (cli.VirDomain, error)) (cli.VirDomain, error) {
+			controllersSeen = append(controllersSeen, len(spec.Devices.Controllers))
+			portsTried = append(portsTried, ports)
+			spec.Devices.Controllers = append(spec.Devices.Controllers, api.Controller{
+				Type:  "pci",
+				Model: "pcie-root-port",
+				Alias: api.NewUserDefinedAlias(fmt.Sprintf("ua-hotplug-%d", attempt)),
+			})
+			attempt++
+			if attempt == 1 {
+				return nil, fmt.Errorf("virError(Code=1, Domain=20, Message='%s')", pciRootPortExhaustionMessage)
+			}
+			return nil, nil
+		}
+
+		dom, err := manager.allocateHotplugPorts(vmi, domainSpec)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(dom).To(BeNil())
+		Expect(controllersSeen).To(Equal([]int{0, 0}))
+		Expect(portsTried).To(Equal([]int{20, 19}))
+		Expect(domainSpec.Devices.Controllers).To(HaveLen(1))
+		Expect(domainSpec.Devices.Controllers[0].Alias.GetName()).To(Equal("ua-hotplug-1"))
+	})
+
+	It("degrades the requested placeholder ports sequentially even after connection resets", func() {
+		vmi := newVMI("testns", "kubevirt")
+		vmi.Spec.Domain.Devices.Interfaces = nil
+		vmi.Annotations = map[string]string{
+			v1.PciInterfaceSlotCountAnnotation: "6",
+		}
+		domainSpec := newDomainSpec(2)
+		domainSpec.Memory.Value = 1024 * 1024 * 1024
+
+		var portsTried []int
+		withNetworkIfacesResources = func(_ *v1.VirtualMachineInstance, _ *api.DomainSpec, ports int, _ func(*v1.VirtualMachineInstance, *api.DomainSpec) (cli.VirDomain, error)) (cli.VirDomain, error) {
+			portsTried = append(portsTried, ports)
+			switch len(portsTried) {
+			case 1, 2:
+				return nil, fmt.Errorf("virError(Code=1, Domain=20, Message='%s')", pciRootPortExhaustionMessage)
+			case 3:
+				return nil, fmt.Errorf("rpc error: code = Unavailable desc = connection error: desc = \"connection reset by peer\"")
+			case 4:
+				return nil, fmt.Errorf("virError(Code=1, Domain=20, Message='%s')", pciRootPortExhaustionMessage)
+			default:
+				return nil, nil
+			}
+		}
+
+		dom, err := manager.allocateHotplugPorts(vmi, domainSpec)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(dom).To(BeNil())
+		Expect(portsTried).To(Equal([]int{6, 5, 4, 3, 2}))
+	})
+})
+
 var _ = Describe("calculatePlaceholderCount", func() {
 	It("should derive placeholders from frozen slot total when present", func() {
 		vmi := newVMI("testns", "kubevirt")
@@ -4226,13 +4320,111 @@ var _ = Describe("calculateHotplugPortCountV2", func() {
 		Entry("with 2G memory and 8 ports in use", uint64(2*gb), 8, 3),
 		Entry("with 2G+ memory and 2 ports in use", uint64(2*gb+1), 2, 14),
 		Entry("with 2G+ memory and 8 ports in use", uint64(2*gb+1), 8, 8),
-		Entry("with 3G memory and no ports in use", uint64(3*gb), 0, 16),
+		Entry("with 3G memory and no ports in use", uint64(3*gb), 0, 14),
 		Entry("with 3G memory and 4 ports in use", uint64(3*gb), 4, 12),
 		Entry("with 3G memory and 8 ports in use", uint64(3*gb), 8, 8),
 		Entry("with 3G memory and 10 ports in use", uint64(3*gb), 10, 6),
 		Entry("with 3G memory and 12 ports in use", uint64(3*gb), 12, 6),
 		Entry("with 3G memory and 16 ports in use", uint64(3*gb), 16, 6),
 	)
+
+	It("should return 0 when NUMA planner already provisioned hotplug root ports", func() {
+		vmi := newVMI("testns", "kubevirt")
+		domainSpec := domainWithDevices(10)
+		domainSpec.Memory.Value = 3 * gb
+
+		for i := 0; i < 6; i++ {
+			domainSpec.Devices.Controllers = append(domainSpec.Devices.Controllers, api.Controller{
+				Type:  "pci",
+				Model: "pcie-root-port",
+				Alias: api.NewUserDefinedAlias(fmt.Sprintf("numa-rp-%d", i)),
+				Address: &api.Address{
+					Type:     api.AddressPCI,
+					Domain:   "0x0000",
+					Bus:      "0x00",
+					Slot:     fmt.Sprintf("0x%02x", rootHotplugSlotStart+i),
+					Function: "0x0",
+				},
+			})
+		}
+
+		count, err := calculateHotplugPortCount(vmi, domainSpec)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(count).To(Equal(0))
+	})
+
+	It("should treat user-prefixed NUMA hotplug aliases as provisioned ports", func() {
+		vmi := newVMI("testns", "kubevirt")
+		domainSpec := domainWithDevices(10)
+		domainSpec.Memory.Value = 3 * gb
+
+		for i := 0; i < 6; i++ {
+			domainSpec.Devices.Controllers = append(domainSpec.Devices.Controllers, api.Controller{
+				Type:  "pci",
+				Model: "pcie-root-port",
+				Alias: api.NewUserDefinedAlias(fmt.Sprintf("%snuma-rp-%d", api.UserAliasPrefix, i)),
+				Address: &api.Address{
+					Type:     api.AddressPCI,
+					Domain:   "0x0000",
+					Bus:      "0x00",
+					Slot:     fmt.Sprintf("0x%02x", rootHotplugSlotStart+i),
+					Function: "0x0",
+				},
+			})
+		}
+
+		count, err := calculateHotplugPortCount(vmi, domainSpec)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(count).To(Equal(0))
+	})
+
+	It("should cap the number of requested ports to the available root slots", func() {
+		vmi := newVMI("testns", "kubevirt")
+		domainSpec := domainWithDevices(0)
+		domainSpec.Memory.Value = 3 * gb
+
+		for slot := rootHotplugSlotStart; slot <= rootReservedSlotSATA; slot++ {
+			if slot == rootReservedSlotICH9Sound || slot == rootReservedSlotSATA {
+				continue
+			}
+			if slot == rootHotplugSlotStart || slot == rootHotplugSlotStart+1 {
+				continue
+			}
+			domainSpec.Devices.Controllers = append(domainSpec.Devices.Controllers, api.Controller{
+				Type:  "pci",
+				Model: "pcie-root-port",
+				Alias: api.NewUserDefinedAlias(fmt.Sprintf("ua-existing-%d", slot)),
+				Address: &api.Address{
+					Type:     api.AddressPCI,
+					Domain:   "0x0000",
+					Bus:      "0x00",
+					Slot:     fmt.Sprintf("0x%02x", slot),
+					Function: "0x0",
+				},
+			})
+		}
+
+		count, err := calculateHotplugPortCount(vmi, domainSpec)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(count).To(Equal(2))
+	})
+
+})
+
+var _ = Describe("isRootPortSlotExhaustionError", func() {
+	It("detects slot exhaustion errors", func() {
+		err := fmt.Errorf("virError(Code=1, Domain=20, Message='%s')", pciRootPortExhaustionMessage)
+		Expect(isRootPortSlotExhaustionError(err)).To(BeTrue())
+	})
+
+	It("ignores other libvirt errors", func() {
+		err := fmt.Errorf("virError(Code=1, Domain=20, Message='something else')")
+		Expect(isRootPortSlotExhaustionError(err)).To(BeFalse())
+	})
+
+	It("returns false for nil", func() {
+		Expect(isRootPortSlotExhaustionError(nil)).To(BeFalse())
+	})
 })
 
 func newVMI(namespace, name string) *v1.VirtualMachineInstance {

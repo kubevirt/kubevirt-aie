@@ -65,6 +65,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/arch"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/vcpu"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice"
 )
 
 const (
@@ -117,6 +118,7 @@ type ConverterContext struct {
 	BochsForEFIGuests               bool
 	SerialConsoleLog                bool
 	DomainAttachmentByInterfaceName map[string]string
+	PCINUMAAwareTopologyEnabled     bool
 }
 
 func assignDiskToSCSIController(disk *api.Disk, unit int) {
@@ -1955,6 +1957,13 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 
 	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.GenericHostDevices...)
 	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.GPUHostDevices...)
+	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.SRIOVDevices...)
+
+	// Apply host device NUMA topology based on VMI spec and node topology
+	// Only apply if PCINUMAAwareTopology feature gate is enabled
+	if c.PCINUMAAwareTopologyEnabled {
+		hostdevice.ApplyNUMAHostDeviceTopology(vmi, domain)
+	}
 
 	if vmi.Spec.Domain.CPU == nil || vmi.Spec.Domain.CPU.Model == "" {
 		domain.Spec.CPU.Mode = v1.CPUModeHostModel
@@ -2032,8 +2041,6 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		return err
 	}
 	domain.Spec.Devices.Interfaces = append(domain.Spec.Devices.Interfaces, domainInterfaces...)
-	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.SRIOVDevices...)
-
 	// Add Ignition Command Line if present
 	ignitiondata := vmi.Annotations[v1.IgnitionAnnotation]
 	if ignitiondata != "" && strings.Contains(ignitiondata, "ignition") {
