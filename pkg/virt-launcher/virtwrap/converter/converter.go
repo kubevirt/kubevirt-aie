@@ -1150,7 +1150,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 					{
 						ID:     "0",
 						CPUs:   fmt.Sprintf("0-%d", domain.Spec.VCPU.CPUs-1),
-						Memory: uint64(vcpu.GetVirtualMemory(vmi).Value() / int64(1024)),
+						Memory: strconv.FormatInt(vcpu.GetVirtualMemory(vmi).Value()/int64(1024), 10),
 						Unit:   "KiB",
 					},
 				},

@@ -94,7 +94,7 @@ func handleFakeNumaNodes(domain *api.DomainSpec) {
 			for count := range 8 {
 				domain.CPU.NUMA.Cells = append(domain.CPU.NUMA.Cells, api.NUMACell{
 					ID:     fmt.Sprintf("%d", initialNumaCellId+count),
-					Memory: 0,
+					Memory: "0",
 					Unit:   "KiB",
 				})
 				finalNumaCellId = initialNumaCellId + count

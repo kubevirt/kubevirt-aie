@@ -253,8 +253,8 @@ var _ = ginkgo.Describe("Schema", func() {
 			spec := &DomainSpec{}
 			expectedSpec := &DomainSpec{
 				CPU: CPU{NUMA: &NUMA{Cells: []NUMACell{
-					{ID: "0", CPUs: "0-1", Memory: 3, Unit: "GiB"},
-					{ID: "1", CPUs: "2-3", Memory: 3, Unit: "GiB"},
+					{ID: "0", CPUs: "0-1", Memory: "3", Unit: "GiB"},
+					{ID: "1", CPUs: "2-3", Memory: "3", Unit: "GiB"},
 				}}},
 				CPUTune: &CPUTune{
 					VCPUPin: []CPUTuneVCPUPin{

@@ -651,7 +651,7 @@ func numaMapping(vmi *v12.VirtualMachineInstance, domain *api.DomainSpec, topolo
 			domain.CPU.NUMA.Cells = append(domain.CPU.NUMA.Cells, api.NUMACell{
 				ID:     strconv.Itoa(virtualCellID),
 				CPUs:   strings.Join(cpus, ","),
-				Memory: memoryBytes / uint64(len(numamap)),
+				Memory: strconv.FormatInt(int64(memoryBytes/uint64(len(numamap))), 10),
 				Unit:   memory.Unit,
 			})
 			domain.NUMATune.MemNodes = append(domain.NUMATune.MemNodes, api.MemNode{
@@ -669,7 +669,8 @@ func numaMapping(vmi *v12.VirtualMachineInstance, domain *api.DomainSpec, topolo
 
 	if mod > 0 {
 		for i := range domain.CPU.NUMA.Cells[:mod] {
-			domain.CPU.NUMA.Cells[i].Memory += hugepagesSize
+			numaCellMem, _ := strconv.ParseUint(domain.CPU.NUMA.Cells[i].Memory, 10, 64)
+			domain.CPU.NUMA.Cells[i].Memory = strconv.FormatUint(numaCellMem+hugepagesSize, 10)
 		}
 	}
 	if vmi.IsRealtimeEnabled() {

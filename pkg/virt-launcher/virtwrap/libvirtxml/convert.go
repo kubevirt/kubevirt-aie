@@ -56,10 +56,14 @@ func ConvertKubeVirtNUMACellToDomainDomainCell(cell []api.NUMACell) ([]libvirtxm
 			return nil, err
 		}
 		id := uint(v)
+		num, err := strconv.ParseUint(c.Memory, 10, 32)
+		if err != nil {
+			return nil, err
+		}
 		ret = append(ret, libvirtxml.DomainCell{
 			ID:        &id,
 			CPUs:      c.CPUs,
-			Memory:    uint(c.Memory),
+			Memory:    uint(num),
 			Unit:      c.Unit,
 			MemAccess: c.MemoryAccess,
 		})

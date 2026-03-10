@@ -20,9 +20,9 @@ var _ = Describe("NumaPlacement", func() {
 	var givenTopology *cmdv1.Topology
 	var expectedSpec *api.DomainSpec
 	var MiBInBytes_2 = strconv.Itoa(2 * 1024 * 1024)
-	var MiBInBytes_22 uint64 = 22 * 1024 * 1024
-	var MiBInBytes_20 uint64 = 20 * 1024 * 1024
-	var MiBInBytes_32 uint64 = 32 * 1024 * 1024
+	var MiBInBytes_22 = strconv.FormatInt(22*1024*1024, 10)
+	var MiBInBytes_20 = strconv.FormatInt(20*1024*1024, 10)
+	var MiBInBytes_32 = strconv.FormatInt(32*1024*1024, 10)
 
 	BeforeEach(func() {
 		var err error
