@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -40,9 +41,10 @@ import (
 )
 
 const (
-	vfioDevicePath = "/dev/vfio/"
-	vfioMount      = "/dev/vfio/vfio"
-	pciBasePath    = "/sys/bus/pci/devices"
+	vfioDevicePath  = "/dev/vfio/"
+	vfioMount       = "/dev/vfio/vfio"
+	pciBasePath     = "/sys/bus/pci/devices"
+	iommuDevicePath = "/dev/iommu"
 )
 
 type PCIDevice struct {
@@ -149,10 +151,15 @@ func constructDPIdevices(pciDevices []*PCIDevice, iommuToPCIMap map[string]strin
 }
 
 func (dpi *PCIDevicePlugin) Allocate(_ context.Context, r *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+	logger := log.DefaultLogger()
 	resourceNameEnvVar := util.ResourceNameToEnvVar(v1.PCIResourcePrefix, dpi.resourceName)
 	allocatedDevices := []string{}
 	resp := new(pluginapi.AllocateResponse)
 	containerResponse := new(pluginapi.ContainerAllocateResponse)
+	iommufdSuppored, err := supportsIOMMUFD(dpi.deviceRoot)
+	if err != nil {
+		logger.V(6).Infof("could not determine iommufd support: %v", err)
+	}
 
 	for _, request := range r.ContainerRequests {
 		deviceSpecs := make([]*pluginapi.DeviceSpec, 0)
@@ -164,6 +171,26 @@ func (dpi *PCIDevicePlugin) Allocate(_ context.Context, r *pluginapi.AllocateReq
 			}
 			allocatedDevices = append(allocatedDevices, devPCIAddress)
 			deviceSpecs = append(deviceSpecs, formatVFIODeviceSpecs(devID)...)
+			if iommufdSuppored {
+				vfiodev, err := readVFIODev(filepath.Join(dpi.deviceRoot, pciBasePath), devPCIAddress)
+				if err != nil {
+					logger.V(6).Infof("could not determine iommufd device for device %s: %v", devPCIAddress, err)
+					continue
+				}
+				devSpecs := make([]*pluginapi.DeviceSpec, 0)
+				devSpecs = append(devSpecs, &pluginapi.DeviceSpec{
+					HostPath:      iommuDevicePath,
+					ContainerPath: iommuDevicePath,
+					Permissions:   "mrw",
+				})
+
+				devSpecs = append(devSpecs, &pluginapi.DeviceSpec{
+					HostPath:      filepath.Join(vfioDevicePath, "devices", vfiodev),
+					ContainerPath: filepath.Join(vfioDevicePath, "devices", vfiodev),
+					Permissions:   "mrw",
+				})
+				deviceSpecs = append(deviceSpecs, devSpecs...)
+			}
 		}
 		containerResponse.Devices = deviceSpecs
 		envVar := make(map[string]string)
@@ -254,6 +281,7 @@ func (dpi *PCIDevicePlugin) healthCheck() error {
 }
 
 func discoverPermittedHostPCIDevices(supportedPCIDeviceMap map[string]string) map[string][]*PCIDevice {
+	logger := log.DefaultLogger()
 	pciDevicesMap := make(map[string][]*PCIDevice)
 	err := filepath.Walk(pciBasePath, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
@@ -267,9 +295,10 @@ func discoverPermittedHostPCIDevices(supportedPCIDeviceMap map[string]string) ma
 		if resourceName, supported := supportedPCIDeviceMap[pciID]; supported {
 			// check device driver
 			driver, err := handler.GetDeviceDriver(pciBasePath, info.Name())
-			if err != nil || driver != "vfio-pci" {
+			if err != nil || (driver != "vfio-pci" && driver != "nvgrace_gpu_vfio_pci") {
 				return nil
 			}
+			logger.V(3).Infof("driver:  %s", driver)
 
 			pcidev := &PCIDevice{
 				pciID:      pciID,
@@ -290,4 +319,31 @@ func discoverPermittedHostPCIDevices(supportedPCIDeviceMap map[string]string) ma
 		log.DefaultLogger().Reason(err).Errorf("failed to discover host devices")
 	}
 	return pciDevicesMap
+}
+
+func supportsIOMMUFD(rootPath string) (bool, error) {
+	_, err := os.Stat(filepath.Join(rootPath, iommuDevicePath))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func readVFIODev(basePath string, deviceAddress string) (string, error) {
+	content, err := os.ReadDir(filepath.Join(basePath, deviceAddress, "vfio-dev"))
+	if err != nil {
+		return "", err
+	}
+	for _, c := range content {
+		if !c.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(c.Name(), "vfio") {
+			return c.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("no iommufd device found")
 }
