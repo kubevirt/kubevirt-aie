@@ -1309,6 +1309,14 @@ func validateGraceVirtualizationAnnotation(metadataField, specField *k8sfield.Pa
 			Field:   metadataField.Child("annotations").String(),
 		})
 	}
+	if util.GraceFieldEnabled(cfg.VCMDQ) && util.GraceFieldEnabled(cfg.SMMUv3) && !util.GraceFieldEnabled(cfg.EGM) && !hasHugepagesConfigured(spec) {
+		causes = append(causes, metav1.StatusCause{
+			Type: metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: vcmdq requires hugepages unless egm=true",
+				annotationPath),
+			Field: specField.Child("domain", "memory", "hugepages").String(),
+		})
+	}
 
 	return causes
 }
@@ -1318,6 +1326,13 @@ func effectiveArchitecture(spec *v1.VirtualMachineInstanceSpec, config *virtconf
 		return spec.Architecture
 	}
 	return config.GetDefaultArchitecture()
+}
+
+func hasHugepagesConfigured(spec *v1.VirtualMachineInstanceSpec) bool {
+	return spec != nil &&
+		spec.Domain.Memory != nil &&
+		spec.Domain.Memory.Hugepages != nil &&
+		strings.TrimSpace(spec.Domain.Memory.Hugepages.PageSize) != ""
 }
 
 // Copied from kubernetes/pkg/apis/core/validation/validation.go

@@ -3256,10 +3256,16 @@ func hasNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domainSpec *api.D
 
 	// Check if any PXB controllers exist (indicates NUMA topology was applied)
 	for _, ctrl := range domainSpec.Devices.Controllers {
-		if ctrl.Model == "pcie-expander-bus" && ctrl.Alias != nil {
-			if strings.HasPrefix(ctrl.Alias.GetName(), "numa-pxb") {
-				return true
-			}
+		if ctrl.Model != "pcie-expander-bus" {
+			continue
+		}
+		// New Grace smmuv3 wiring can intentionally keep default libvirt IDs
+		// (no user alias), so treat NUMA-tagged expander buses as active too.
+		if ctrl.Target != nil && ctrl.Target.Node != nil {
+			return true
+		}
+		if ctrl.Alias != nil && strings.HasPrefix(ctrl.Alias.GetName(), "numa-pxb") {
+			return true
 		}
 	}
 

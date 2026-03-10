@@ -519,6 +519,7 @@ type Devices struct {
 	Interfaces   []Interface        `xml:"interface"`
 	Channels     []Channel          `xml:"channel"`
 	HostDevices  []HostDevice       `xml:"hostdev,omitempty"`
+	IOMMUs       []IOMMU            `xml:"iommu,omitempty"`
 	PanicDevices []PanicDevice      `xml:"panic,omitempty"`
 	Controllers  []Controller       `xml:"controller,omitempty"`
 	Video        []Video            `xml:"video"`
@@ -616,17 +617,27 @@ type Input struct {
 
 // BEGIN HostDevice -----------------------------
 type HostDevice struct {
-	XMLName   xml.Name         `xml:"hostdev"`
-	Source    HostDeviceSource `xml:"source"`
-	Type      string           `xml:"type,attr"`
-	BootOrder *BootOrder       `xml:"boot,omitempty"`
-	Managed   string           `xml:"managed,attr,omitempty"`
-	Mode      string           `xml:"mode,attr,omitempty"`
-	Model     string           `xml:"model,attr,omitempty"`
-	Address   *Address         `xml:"address,omitempty"`
-	Alias     *Alias           `xml:"alias,omitempty"`
-	Display   string           `xml:"display,attr,omitempty"`
-	RamFB     string           `xml:"ramfb,attr,omitempty"`
+	XMLName   xml.Name          `xml:"hostdev"`
+	Source    HostDeviceSource  `xml:"source"`
+	Type      string            `xml:"type,attr"`
+	BootOrder *BootOrder        `xml:"boot,omitempty"`
+	Driver    *HostDeviceDriver `xml:"driver,omitempty"`
+	ACPI      *HostDeviceACPI   `xml:"acpi,omitempty"`
+	Managed   string            `xml:"managed,attr,omitempty"`
+	Mode      string            `xml:"mode,attr,omitempty"`
+	Model     string            `xml:"model,attr,omitempty"`
+	Address   *Address          `xml:"address,omitempty"`
+	Alias     *Alias            `xml:"alias,omitempty"`
+	Display   string            `xml:"display,attr,omitempty"`
+	RamFB     string            `xml:"ramfb,attr,omitempty"`
+}
+
+type HostDeviceDriver struct {
+	IOMMUFD string `xml:"iommufd,attr,omitempty"`
+}
+
+type HostDeviceACPI struct {
+	NodeSet string `xml:"nodeset,attr"`
 }
 
 type HostDeviceSource struct {
@@ -634,6 +645,24 @@ type HostDeviceSource struct {
 }
 
 // END HostDevice -----------------------------
+
+// BEGIN IOMMU -----------------------------
+type IOMMU struct {
+	Model  string       `xml:"model,attr,omitempty"`
+	Driver *IOMMUDriver `xml:"driver,omitempty"`
+}
+
+type IOMMUDriver struct {
+	PCIBus string `xml:"pciBus,attr,omitempty"`
+	Accel  string `xml:"accel,attr,omitempty"`
+	ATS    string `xml:"ats,attr,omitempty"`
+	RIL    string `xml:"ril,attr,omitempty"`
+	PASID  string `xml:"pasid,attr,omitempty"`
+	OAS    string `xml:"oas,attr,omitempty"`
+	CMDQV  string `xml:"cmdqv,attr,omitempty"`
+}
+
+// END IOMMU -----------------------------
 
 // BEGIN Controller -----------------------------
 
