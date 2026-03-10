@@ -51,14 +51,23 @@ const (
 	//
 	// The 128 GiB value is intentionally a detection threshold, not an exact GPU
 	// BAR size or hardware ABI. Devices above this threshold are treated as
-	// large-MMIO GPU-like devices that need a dedicated PXB hierarchy and Grace GPU
-	// HBM ACPI nodeset mapping. Longer term, this should be driven by explicit
+	// large-MMIO GPU-like devices that need a dedicated PXB hierarchy and Grace
+	// ACPI GI nodeset mapping. Longer term, this should be driven by explicit
 	// host-device metadata such as resource type, vendor, and PCI class, with BAR
 	// size used only as a fallback signal.
 	largeMMIOPXBIsolationThresholdGiB = uint64(128)
 	largeMMIOPXBIsolationThreshold    = largeMMIOPXBIsolationThresholdGiB << 30
-	graceHBMNodesPerGPU               = 8
-	graceHBMNodeSetBase               = 1
+	// NVIDIA Grace GPU passthrough requires dedicated guest ACPI Generic
+	// Initiator NUMA cells per GPU. These are zero-memory guest cells referenced
+	// by the hostdev <acpi nodeset='...'> element; they are not the host's HBM
+	// memory NUMA nodes. Grace I/O virtualization contract uses eight GI cells
+	// per passed-through GPU for driver/MIG memory onlining in the guest.
+	//
+	// Treat this as a current virtualization contract, not a hardware ABI for the
+	// host NUMA topology. Longer term, the GI count should be discovered from host
+	// sysfs/ACPI topology per GPU.
+	graceGINodesPerGPU = 8
+	graceGINodeSetBase = 1
 )
 
 var (
@@ -447,6 +456,7 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 
 	// Add a default root port for general-purpose device assignment
 	planner.addDefaultRootPort()
+	graceGINodeSetAssignments := buildGraceGINodeSetAssignments(domain, devicesWithNUMA, graceHostDevicesEnabled)
 
 	for _, key := range groupKeys {
 		infos := grouped[key]
@@ -504,7 +514,7 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 
 			assignHostDeviceToRootPort(info.dev, rootPort)
 			if graceHostDevicesEnabled {
-				applyGraceHostDeviceSettings(info.dev, key.guestNUMANode, info.dedicatedPXB)
+				applyGraceHostDeviceSettings(info.dev, key.guestNUMANode, graceGINodeSetAssignments[info.dev])
 			}
 			log.Log.V(1).Infof("assigned host device %s to host NUMA %d (guest NUMA %d) via controller %d", info.bdf, key.hostNUMANode, key.guestNUMANode, rootPort.controllerIndex)
 		}
@@ -1439,7 +1449,7 @@ func collectNUMAPXBPciBuses(domain *api.Domain) []string {
 	return buses
 }
 
-func applyGraceHostDeviceSettings(dev *api.HostDevice, guestNUMANode int, dedicatedPXB bool) {
+func applyGraceHostDeviceSettings(dev *api.HostDevice, guestNUMANode int, giNodeSet string) {
 	if dev == nil || dev.Type != api.HostDevicePCI {
 		return
 	}
@@ -1449,22 +1459,137 @@ func applyGraceHostDeviceSettings(dev *api.HostDevice, guestNUMANode int, dedica
 	}
 	dev.Driver.IOMMUFD = defaultHostDeviceIOMMUFD
 
-	nodeSet := strconv.Itoa(guestNUMANode)
-	if dedicatedPXB {
-		nodeSet = graceGPUHBMNodeSet(guestNUMANode)
+	nodeSet := strings.TrimSpace(giNodeSet)
+	if nodeSet == "" {
+		nodeSet = strconv.Itoa(guestNUMANode)
 	}
 	dev.ACPI = &api.HostDeviceACPI{
 		NodeSet: nodeSet,
 	}
 }
 
-func graceGPUHBMNodeSet(guestNUMANode int) string {
-	if guestNUMANode < 0 {
-		return strconv.Itoa(unifiedNUMAGroup)
+func buildGraceGINodeSetAssignments(domain *api.Domain, devicesWithNUMA []deviceNUMAInfo, graceHostDevicesEnabled bool) map[*api.HostDevice]string {
+	assignments := make(map[*api.HostDevice]string)
+	if !graceHostDevicesEnabled || domain == nil {
+		return assignments
 	}
-	start := (guestNUMANode * graceHBMNodesPerGPU) + graceHBMNodeSetBase
-	end := start + graceHBMNodesPerGPU - 1
-	return fmt.Sprintf("%d-%d", start, end)
+
+	giDevices := make([]deviceNUMAInfo, 0, len(devicesWithNUMA))
+	for _, info := range devicesWithNUMA {
+		if info.dev == nil || info.dev.Type != api.HostDevicePCI {
+			continue
+		}
+		// Current Grace GPU passthrough guidance uses dedicated zero-memory GI
+		// NUMA nodes per large-MMIO GPU. We treat dedicated PXB devices as GI
+		// consumers so each GPU receives a unique guest ACPI nodeset.
+		if !info.dedicatedPXB {
+			continue
+		}
+		giDevices = append(giDevices, info)
+	}
+	if len(giDevices) == 0 {
+		return assignments
+	}
+
+	slices.SortFunc(giDevices, func(a, b deviceNUMAInfo) int {
+		if a.guestNUMANode != b.guestNUMANode {
+			if a.guestNUMANode < b.guestNUMANode {
+				return -1
+			}
+			return 1
+		}
+		if a.bdf == b.bdf {
+			return 0
+		}
+		if a.bdf < b.bdf {
+			return -1
+		}
+		return 1
+	})
+
+	nextNode := nextAvailableGuestNUMACellID(domain)
+	if nextNode < graceGINodeSetBase {
+		nextNode = graceGINodeSetBase
+	}
+	for _, info := range giDevices {
+		start := nextNode
+		end := start + graceGINodesPerGPU - 1
+		ensureGuestNUMACellRange(domain, start, end)
+		assignments[info.dev] = fmt.Sprintf("%d-%d", start, end)
+		log.Log.V(1).Infof("Grace GI: assigned host device %s to dedicated guest NUMA GI nodes %d-%d", info.bdf, start, end)
+		nextNode = end + 1
+	}
+	return assignments
+}
+
+func nextAvailableGuestNUMACellID(domain *api.Domain) int {
+	if domain == nil || domain.Spec.CPU.NUMA == nil {
+		return 0
+	}
+	maxID := -1
+	for _, cell := range domain.Spec.CPU.NUMA.Cells {
+		id, err := strconv.Atoi(strings.TrimSpace(cell.ID))
+		if err != nil {
+			continue
+		}
+		if id > maxID {
+			maxID = id
+		}
+	}
+	return maxID + 1
+}
+
+func ensureGuestNUMACellRange(domain *api.Domain, start, end int) {
+	if domain == nil || start > end {
+		return
+	}
+	if domain.Spec.CPU.NUMA == nil {
+		domain.Spec.CPU.NUMA = &api.NUMA{}
+	}
+	existing := make(map[int]struct{}, len(domain.Spec.CPU.NUMA.Cells))
+	for _, cell := range domain.Spec.CPU.NUMA.Cells {
+		id, err := strconv.Atoi(strings.TrimSpace(cell.ID))
+		if err != nil {
+			continue
+		}
+		existing[id] = struct{}{}
+	}
+	for id := start; id <= end; id++ {
+		if _, ok := existing[id]; ok {
+			continue
+		}
+		domain.Spec.CPU.NUMA.Cells = append(domain.Spec.CPU.NUMA.Cells, api.NUMACell{
+			ID:     strconv.Itoa(id),
+			Memory: 0,
+			Unit:   "KiB",
+		})
+	}
+	slices.SortFunc(domain.Spec.CPU.NUMA.Cells, func(a, b api.NUMACell) int {
+		ai, errA := strconv.Atoi(strings.TrimSpace(a.ID))
+		bi, errB := strconv.Atoi(strings.TrimSpace(b.ID))
+		switch {
+		case errA == nil && errB == nil:
+			if ai == bi {
+				return 0
+			}
+			if ai < bi {
+				return -1
+			}
+			return 1
+		case errA == nil:
+			return -1
+		case errB == nil:
+			return 1
+		default:
+			if a.ID == b.ID {
+				return 0
+			}
+			if a.ID < b.ID {
+				return -1
+			}
+			return 1
+		}
+	})
 }
 
 func shouldUseDedicatedPXBForDevice(info deviceNUMAInfo, graceHostDevicesEnabled bool) bool {

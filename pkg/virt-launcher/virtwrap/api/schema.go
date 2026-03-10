@@ -287,8 +287,8 @@ type NUMA struct {
 
 type NUMACell struct {
 	ID           string `xml:"id,attr"`
-	CPUs         string `xml:"cpus,attr"`
-	Memory       uint64 `xml:"memory,attr,omitempty"`
+	CPUs         string `xml:"cpus,attr,omitempty"`
+	Memory       uint64 `xml:"memory,attr"`
 	Unit         string `xml:"unit,attr,omitempty"`
 	MemoryAccess string `xml:"memAccess,attr,omitempty"`
 }

@@ -641,6 +641,9 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettings(t *testi
 	}
 
 	assignNUMAMapping(domain, map[int]int{0: 0, 1: 1})
+	for node := 2; node <= 16; node++ {
+		appendGuestNUMACells(domain, node)
+	}
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 	stubPCIPath("0000:83:00.0", []string{"0000:80:01.0", "0000:83:00.0"})
 
@@ -710,6 +713,9 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettingsFromGrace
 	}
 
 	assignNUMAMapping(domain, map[int]int{0: 0, 1: 1})
+	for node := 2; node <= 16; node++ {
+		appendGuestNUMACells(domain, node)
+	}
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 	stubPCIPath("0000:83:00.0", []string{"0000:80:01.0", "0000:83:00.0"})
 
@@ -1049,7 +1055,7 @@ func TestCollectNUMAPXBPciBusesUsesControllerIndices(t *testing.T) {
 	}
 }
 
-func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHBMNodeSetsForLargeMMIOGPUs(t *testing.T) {
+func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceGINodeSetsForLargeMMIOGPUs(t *testing.T) {
 	defer restoreNUMAHelpers()
 
 	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
@@ -1109,7 +1115,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHBMNodeSetsForLargeMMIOGPUs
 
 	ApplyNUMAHostDeviceTopology(vmi, domain)
 
-	expectedNodeSets := []string{"1-8", "9-16"}
+	expectedNodeSets := []string{"2-9", "10-17"}
 	for i := range domain.Spec.Devices.HostDevices {
 		dev := domain.Spec.Devices.HostDevices[i]
 		if dev.Driver == nil || dev.Driver.IOMMUFD != "yes" {
@@ -1117,6 +1123,137 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHBMNodeSetsForLargeMMIOGPUs
 		}
 		if dev.ACPI == nil || dev.ACPI.NodeSet != expectedNodeSets[i] {
 			t.Fatalf("expected host device %d to have ACPI nodeset %s, got %+v", i, expectedNodeSets[i], dev.ACPI)
+		}
+	}
+
+	for id := 0; id <= 17; id++ {
+		idStr := strconv.Itoa(id)
+		found := false
+		for _, cell := range domain.Spec.CPU.NUMA.Cells {
+			if cell.ID != idStr {
+				continue
+			}
+			found = true
+			if id >= 2 {
+				if cell.Memory != 0 || cell.Unit != "KiB" {
+					t.Fatalf("expected GI NUMA cell %d to be zero-memory KiB cell, got memory=%d unit=%q", id, cell.Memory, cell.Unit)
+				}
+			}
+			break
+		}
+		if !found {
+			t.Fatalf("expected guest NUMA cell %d to exist after GI allocation", id)
+		}
+	}
+}
+
+func TestApplyNUMAHostDeviceTopologyAssignsUniqueGINodeSetsPerLargeMMIOGPU(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(bdf string) (int, error) {
+		switch bdf {
+		case "0000:08:00.0", "0000:09:00.0":
+			return 0, nil
+		case "0000:18:00.0", "0000:19:00.0":
+			return 1, nil
+		default:
+			return -1, fmt.Errorf("unexpected bdf %s", bdf)
+		}
+	}
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: "arm64",
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x19"),
+					newTestPCIHostDevice("gpu1", "0x0000", "0x08"),
+					newTestPCIHostDevice("gpu2", "0x0000", "0x18"),
+					newTestPCIHostDevice("gpu3", "0x0000", "0x09"),
+				},
+			},
+		},
+	}
+
+	assignNUMAMapping(domain, map[int]int{0: 0, 1: 1})
+	stubPCIPath("0000:08:00.0", []string{"0000:00:08.0", "0000:08:00.0"})
+	stubPCIPath("0000:09:00.0", []string{"0000:00:09.0", "0000:09:00.0"})
+	stubPCIPath("0000:18:00.0", []string{"0000:00:18.0", "0000:18:00.0"})
+	stubPCIPath("0000:19:00.0", []string{"0000:00:19.0", "0000:19:00.0"})
+
+	ApplyNUMAHostDeviceTopology(vmi, domain)
+
+	expectedByBDF := map[string]string{
+		"0000:08:00.0": "2-9",
+		"0000:09:00.0": "10-17",
+		"0000:18:00.0": "18-25",
+		"0000:19:00.0": "26-33",
+	}
+	seenNodeSets := make(map[string]struct{}, len(domain.Spec.Devices.HostDevices))
+	for i := range domain.Spec.Devices.HostDevices {
+		dev := domain.Spec.Devices.HostDevices[i]
+		if dev.Driver == nil || dev.Driver.IOMMUFD != "yes" {
+			t.Fatalf("expected host device %d to have iommufd enabled", i)
+		}
+		if dev.ACPI == nil {
+			t.Fatalf("expected host device %d to have ACPI nodeset", i)
+		}
+		bdf := fmt.Sprintf("%s:%s:00.0",
+			strings.TrimPrefix(dev.Source.Address.Domain, "0x"),
+			strings.TrimPrefix(dev.Source.Address.Bus, "0x"),
+		)
+		expectedNodeSet, ok := expectedByBDF[bdf]
+		if !ok {
+			t.Fatalf("unexpected host device bdf %s", bdf)
+		}
+		if dev.ACPI.NodeSet != expectedNodeSet {
+			t.Fatalf("expected host device %s to have ACPI nodeset %s, got %s", bdf, expectedNodeSet, dev.ACPI.NodeSet)
+		}
+		if _, exists := seenNodeSets[dev.ACPI.NodeSet]; exists {
+			t.Fatalf("expected unique GI nodesets per GPU, found duplicate %s", dev.ACPI.NodeSet)
+		}
+		seenNodeSets[dev.ACPI.NodeSet] = struct{}{}
+	}
+
+	for id := 0; id <= 33; id++ {
+		idStr := strconv.Itoa(id)
+		found := false
+		for _, cell := range domain.Spec.CPU.NUMA.Cells {
+			if cell.ID == idStr {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected guest NUMA cell %d to exist after GI allocation", id)
 		}
 	}
 }
@@ -1294,6 +1431,28 @@ func assignNUMAMapping(domain *api.Domain, mapping map[int]int) {
 	domain.Spec.NUMATune = &api.NUMATune{
 		MemNodes: memNodes,
 	}
+}
+
+func appendGuestNUMACells(domain *api.Domain, ids ...int) {
+	if domain.Spec.CPU.NUMA == nil {
+		domain.Spec.CPU.NUMA = &api.NUMA{}
+	}
+	existing := make(map[string]struct{}, len(domain.Spec.CPU.NUMA.Cells))
+	for _, cell := range domain.Spec.CPU.NUMA.Cells {
+		existing[cell.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		idStr := strconv.Itoa(id)
+		if _, ok := existing[idStr]; ok {
+			continue
+		}
+		domain.Spec.CPU.NUMA.Cells = append(domain.Spec.CPU.NUMA.Cells, api.NUMACell{ID: idStr})
+	}
+	sort.Slice(domain.Spec.CPU.NUMA.Cells, func(i, j int) bool {
+		idi, _ := strconv.Atoi(domain.Spec.CPU.NUMA.Cells[i].ID)
+		idj, _ := strconv.Atoi(domain.Spec.CPU.NUMA.Cells[j].ID)
+		return idi < idj
+	})
 }
 
 // Error Handling Tests
