@@ -21,7 +21,7 @@ import (
 const (
 	rootBusDomain           = "0x0000"
 	defaultPXBSlot          = 0x0a
-	maxPXBSlot              = 0x0f // PXB slots must stay below hotplug range
+	maxPXBSlot              = 0x1a // Leave 0x1b-0x1f for root hotplug ports
 	maxRootBusSlot          = 0x1f
 	maxRootPortSlot         = 0x1f
 	pxbBusNumberBase        = 0x20 // Base bus number for PXB hierarchies (32, 64, 96, etc.)
@@ -35,7 +35,7 @@ const (
 	numaRootPortPrefix  = "numa-rp"
 	rootPortAliasLength = 12
 
-	rootHotplugSlotStart           = 0x10
+	rootHotplugSlotStart           = 0x1b
 	HotplugRootPortAliasPrefix     = "hotplug-rp-"
 	numaHotplugAliasDiscriminator  = "numa-"
 	NUMAHotplugRootPortAliasPrefix = HotplugRootPortAliasPrefix + numaHotplugAliasDiscriminator
@@ -78,6 +78,7 @@ var (
 	getDevicePCIPathHierarchyFunc  = hardware.GetDevicePCIPathHierarchy
 	getDeviceIOMMUGroupInfoFunc    = hardware.GetDeviceIOMMUGroupInfo
 	getDevicePCITotalMMIOSizeFunc  = getDevicePCITotalMMIOSize
+	isIOMMUFDDeviceAvailableFunc   = isIOMMUFDDeviceAvailable
 )
 
 // NormalizeHotplugRootPortAlias strips any user-alias prefixes (like "ua-") that libvirt may add.
@@ -174,7 +175,8 @@ type deviceNUMAInfo struct {
 	iommuGroup      int
 	iommuPeers      []string
 	mappingAccurate bool
-	dedicatedPXB    bool
+	dedicatedPXB    bool // true for large-MMIO devices (GPU class)
+	isolatedPXB     bool // true when the device should get its own PXB hierarchy
 }
 
 type deviceGroupKey struct {
@@ -289,7 +291,13 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 
 	planner := newNUMAPCIPlanner(domain)
 	graceSMMUv3Enabled := graceHostDevicesEnabled && graceCfg != nil && util.GraceFieldEnabled(graceCfg.SMMUv3)
+	// Accelerated Grace SMMUv3 and hostdev iommufd wiring require /dev/iommu inside virt-launcher.
+	// If it is absent, keep the domain XML valid by generating non-accelerated SMMUv3 and omitting hostdev iommufd.
+	iommuFDDeviceAvailable := isIOMMUFDDeviceAvailableFunc()
 	planner.useDefaultPXBIDs = graceSMMUv3Enabled
+	if graceSMMUv3Enabled && !iommuFDDeviceAvailable {
+		log.Log.Warning("Grace smmuv3 requested but /dev/iommu is unavailable; falling back to smmuv3 accel=off and disabling iommufd hostdev backend")
+	}
 	devicesWithNUMA := make([]deviceNUMAInfo, 0, len(hostDevices))
 	hostNUMANodes := make(map[int]struct{})
 	guestNUMANodes := getGuestNUMANodes(domain)
@@ -344,6 +352,11 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 			log.Log.V(1).Infof("host device %s aligned with guest NUMA node %d", bdf, guestNode)
 		}
 
+		largeMMIO := shouldUseDedicatedPXBForDevice(deviceNUMAInfo{
+			dev: dev,
+			bdf: bdf,
+		}, graceHostDevicesEnabled)
+
 		devicesWithNUMA = append(devicesWithNUMA, deviceNUMAInfo{
 			dev:             dev,
 			hostNUMANode:    numaNode,
@@ -355,10 +368,8 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 			iommuGroup:      iommuGroup,
 			iommuPeers:      iommuPeers,
 			mappingAccurate: mappingAccurate,
-			dedicatedPXB: shouldUseDedicatedPXBForDevice(deviceNUMAInfo{
-				dev: dev,
-				bdf: bdf,
-			}, graceHostDevicesEnabled),
+			dedicatedPXB:    largeMMIO,
+			isolatedPXB:     largeMMIO,
 		})
 		hostNUMANodes[numaNode] = struct{}{}
 	}
@@ -388,6 +399,15 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 		return
 	}
 
+	// In Grace mixed GPU+NIC topologies, isolate every passthrough device onto its own PXB hierarchy once large-MMIO and small-MMIO devices
+	// are present together. This prevents shared hierarchies from becoming a contention point.
+	if shouldForceIsolatedPXBsForGraceMixedTopology(graceSMMUv3Enabled, devicesWithNUMA) {
+		log.Log.V(1).Info("NUMA PCI Planner: mixed Grace topology detected (large+small MMIO), forcing isolated PXB hierarchies for all passthrough devices")
+		for i := range devicesWithNUMA {
+			devicesWithNUMA[i].isolatedPXB = true
+		}
+	}
+
 	collapseNUMA := shouldCollapseHostDeviceNUMA(vmi, domain, hostNUMANodes)
 	if collapseNUMA {
 		log.Log.V(1).Info("collapsing host device NUMA groups to a single guest NUMA node")
@@ -407,7 +427,7 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 		} else {
 			log.Log.V(1).Infof("host device %s grouped to host NUMA %d (guest NUMA %d) path %q", info.bdf, groupKey.hostNUMANode, groupKey.guestNUMANode, groupKey.pathKey)
 		}
-		if info.dedicatedPXB {
+		if info.isolatedPXB {
 			groupKey.pxbGroup = info.pathKey
 		}
 		grouped[groupKey] = append(grouped[groupKey], info)
@@ -514,13 +534,14 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 
 			assignHostDeviceToRootPort(info.dev, rootPort)
 			if graceHostDevicesEnabled {
-				applyGraceHostDeviceSettings(info.dev, key.guestNUMANode, graceGINodeSetAssignments[info.dev])
+				enableIOMMUFD := iommuFDDeviceAvailable && (info.dedicatedPXB || graceSMMUv3Enabled)
+				applyGraceHostDeviceSettings(info.dev, key.guestNUMANode, graceGINodeSetAssignments[info.dev], enableIOMMUFD)
 			}
 			log.Log.V(1).Infof("assigned host device %s to host NUMA %d (guest NUMA %d) via controller %d", info.bdf, key.hostNUMANode, key.guestNUMANode, rootPort.controllerIndex)
 		}
 	}
 
-	applyGraceSMMUv3IOMMUTopology(domain, graceCfg, graceHostDevicesEnabled)
+	applyGraceSMMUv3IOMMUTopology(domain, graceCfg, graceHostDevicesEnabled, iommuFDDeviceAvailable)
 
 }
 
@@ -1154,10 +1175,19 @@ func (p *numaPCIPlanner) allocateChassis() int {
 
 func (p *numaPCIPlanner) reservePXBBusNumbers(groupKeys []deviceGroupKey) {
 	// Pre-reserve bus numbers that will be used by PXBs to prevent conflicts
-	// with sequentially allocated bus numbers for other controllers
+	// with sequentially allocated bus numbers for other controllers.
+	//
+	// Also reserve an initial downstream window (base+1, base+2, ...) for the
+	// shared-per-NUMA PXB root ports. Without this, dedicated large-MMIO PXBs can
+	// consume those low buses (for example 0x41/0x43 on NUMA base 0x40), which can
+	// collide with firmware/libvirt secondary-bus assignment on the shared PXB.
 	numaNodes := make(map[int]struct{})
+	sharedGroupsPerNUMA := make(map[int]int)
 	for _, key := range groupKeys {
 		numaNodes[key.hostNUMANode] = struct{}{}
+		if key.pxbGroup == "" {
+			sharedGroupsPerNUMA[key.hostNUMANode]++
+		}
 	}
 
 	for numaNode := range numaNodes {
@@ -1165,6 +1195,25 @@ func (p *numaPCIPlanner) reservePXBBusNumbers(groupKeys []deviceGroupKey) {
 		if busNr <= maxPCIBusNumber {
 			p.reservePCIBus(busNr)
 			log.Log.V(1).Infof("NUMA PCI Planner: Pre-reserved PXB bus 0x%02x for NUMA node %d", busNr, numaNode)
+		}
+
+		sharedGroups := sharedGroupsPerNUMA[numaNode]
+		for offset := 1; offset <= sharedGroups; offset++ {
+			downstreamBus := busNr + offset
+			if downstreamBus > maxPCIBusNumber {
+				break
+			}
+			p.reservePCIBus(downstreamBus)
+		}
+		if sharedGroups > 0 {
+			lastReserved := busNr + sharedGroups
+			if lastReserved > maxPCIBusNumber {
+				lastReserved = maxPCIBusNumber
+			}
+			log.Log.V(1).Infof(
+				"NUMA PCI Planner: Reserved shared-PXB downstream bus window 0x%02x-0x%02x for NUMA node %d",
+				busNr+1, lastReserved, numaNode,
+			)
 		}
 	}
 }
@@ -1324,7 +1373,7 @@ func isGraceHostDevicesEnabledForArch(vmi *v1.VirtualMachineInstance, cfg *util.
 	return arch == "" || strings.EqualFold(arch, arm64Architecture)
 }
 
-func applyGraceSMMUv3IOMMUTopology(domain *api.Domain, cfg *util.GraceVirtualizationConfig, graceHostDevicesEnabled bool) {
+func applyGraceSMMUv3IOMMUTopology(domain *api.Domain, cfg *util.GraceVirtualizationConfig, graceHostDevicesEnabled bool, iommuFDDeviceAvailable bool) {
 	if domain == nil {
 		return
 	}
@@ -1351,17 +1400,28 @@ func applyGraceSMMUv3IOMMUTopology(domain *api.Domain, cfg *util.GraceVirtualiza
 	}
 
 	pciBuses := collectNUMAPXBPciBuses(domain)
+	cmdqvRequested := util.GraceFieldEnabled(cfg.VCMDQ)
 	for _, pciBus := range pciBuses {
+		accel := "off"
+		if iommuFDDeviceAvailable {
+			accel = "on"
+		}
 		driver := &api.IOMMUDriver{
 			PCIBus: pciBus,
-			Accel:  "on",
-			ATS:    "on",
-			RIL:    "off",
-			PASID:  "on",
-			OAS:    "48",
+			Accel:  accel,
 		}
-		if util.GraceFieldEnabled(cfg.VCMDQ) {
-			driver.CMDQV = "on"
+		if accel == "on" {
+			driver.ATS = "on"
+			driver.RIL = "off"
+			driver.PASID = "on"
+			driver.OAS = "48"
+			if cmdqvRequested {
+				driver.CMDQV = "on"
+			}
+		} else {
+			// Non-accelerated SMMUv3 must not advertise ATS/PASID/CMDQV/OAS.
+			// ril='on' matches the libvirt/QEMU shape used without iommufd.
+			driver.RIL = "on"
 		}
 		domain.Spec.Devices.IOMMUs = append(domain.Spec.Devices.IOMMUs, api.IOMMU{
 			Model:  "smmuv3",
@@ -1449,15 +1509,19 @@ func collectNUMAPXBPciBuses(domain *api.Domain) []string {
 	return buses
 }
 
-func applyGraceHostDeviceSettings(dev *api.HostDevice, guestNUMANode int, giNodeSet string) {
+func applyGraceHostDeviceSettings(dev *api.HostDevice, guestNUMANode int, giNodeSet string, enableIOMMUFD bool) {
 	if dev == nil || dev.Type != api.HostDevicePCI {
 		return
 	}
 
-	if dev.Driver == nil {
-		dev.Driver = &api.HostDeviceDriver{}
+	if enableIOMMUFD {
+		if dev.Driver == nil {
+			dev.Driver = &api.HostDeviceDriver{}
+		}
+		dev.Driver.IOMMUFD = defaultHostDeviceIOMMUFD
+	} else {
+		dev.Driver = nil
 	}
-	dev.Driver.IOMMUFD = defaultHostDeviceIOMMUFD
 
 	nodeSet := strings.TrimSpace(giNodeSet)
 	if nodeSet == "" {
@@ -1609,6 +1673,25 @@ func shouldUseDedicatedPXBForDevice(info deviceNUMAInfo, graceHostDevicesEnabled
 	return true
 }
 
+func shouldForceIsolatedPXBsForGraceMixedTopology(graceSMMUv3Enabled bool, devices []deviceNUMAInfo) bool {
+	if !graceSMMUv3Enabled {
+		return false
+	}
+	var hasLargeMMIO bool
+	var hasSmallMMIO bool
+	for i := range devices {
+		if devices[i].dedicatedPXB {
+			hasLargeMMIO = true
+		} else {
+			hasSmallMMIO = true
+		}
+		if hasLargeMMIO && hasSmallMMIO {
+			return true
+		}
+	}
+	return false
+}
+
 func getDevicePCITotalMMIOSize(bdf string) (uint64, error) {
 	resourcePath := filepath.Join("/sys/bus/pci/devices", bdf, "resource")
 	f, err := os.Open(resourcePath)
@@ -1645,6 +1728,11 @@ func getDevicePCITotalMMIOSize(bdf string) (uint64, error) {
 		return 0, err
 	}
 	return total, nil
+}
+
+func isIOMMUFDDeviceAvailable() bool {
+	_, err := os.Stat("/dev/iommu")
+	return err == nil
 }
 
 func resolveHostDevicePCIAddress(dev *api.HostDevice) (string, error) {

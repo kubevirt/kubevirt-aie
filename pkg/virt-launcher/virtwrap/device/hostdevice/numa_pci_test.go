@@ -344,6 +344,54 @@ func TestAllocateDedicatedPXBBusNumberAvoidsAdjacentBusConflicts(t *testing.T) {
 	}
 }
 
+func TestReservePXBBusNumbersReservesSharedRootPortWindowBeforeDedicatedPXB(t *testing.T) {
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+			},
+		},
+	}
+	planner := newNUMAPCIPlanner(domain)
+
+	// NUMA node 1 with:
+	// - 2 shared groups (pxbGroup="") that will live behind the shared PXB
+	// - 2 dedicated groups (pxbGroup!= "") for large-MMIO devices (e.g. GPUs)
+	groupKeys := []deviceGroupKey{
+		{hostNUMANode: 1, guestNUMANode: 1, pathKey: "ib-a", pxbGroup: ""},
+		{hostNUMANode: 1, guestNUMANode: 1, pathKey: "ib-b", pxbGroup: ""},
+		{hostNUMANode: 1, guestNUMANode: 1, pathKey: "gpu-a", pxbGroup: "gpu-a"},
+		{hostNUMANode: 1, guestNUMANode: 1, pathKey: "gpu-b", pxbGroup: "gpu-b"},
+	}
+	planner.reservePXBBusNumbers(groupKeys)
+
+	baseBus := pxbBusNumberBase + pxbBusNumberSpacing // NUMA node 1 base, 0x40
+	for _, bus := range []int{baseBus, baseBus + 1, baseBus + 2} {
+		if _, used := planner.usedPCIBuses[bus]; !used {
+			t.Fatalf("expected bus 0x%02x to be pre-reserved", bus)
+		}
+	}
+
+	firstDedicated, err := planner.allocateDedicatedPXBBusNumber(baseBus)
+	if err != nil {
+		t.Fatalf("failed to allocate first dedicated PXB bus: %v", err)
+	}
+	if firstDedicated != baseBus+3 {
+		t.Fatalf("expected first dedicated PXB bus 0x%02x, got 0x%02x", baseBus+3, firstDedicated)
+	}
+	planner.reservePCIBus(firstDedicated)
+
+	secondDedicated, err := planner.allocateDedicatedPXBBusNumber(baseBus)
+	if err != nil {
+		t.Fatalf("failed to allocate second dedicated PXB bus: %v", err)
+	}
+	if secondDedicated != baseBus+5 {
+		t.Fatalf("expected second dedicated PXB bus 0x%02x, got 0x%02x", baseBus+5, secondDedicated)
+	}
+}
+
 func TestApplyNUMAHostDeviceTopologySingleGuestCellPreservesHostNUMA(t *testing.T) {
 	defer restoreNUMAHelpers()
 
@@ -652,8 +700,8 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettings(t *testi
 	expectedNodeSets := []string{"0", "1"}
 	for i := range domain.Spec.Devices.HostDevices {
 		dev := domain.Spec.Devices.HostDevices[i]
-		if dev.Driver == nil || dev.Driver.IOMMUFD != "yes" {
-			t.Fatalf("expected host device %d to have iommufd enabled", i)
+		if dev.Driver != nil && dev.Driver.IOMMUFD != "" {
+			t.Fatalf("expected host device %d to skip iommufd for non-large MMIO device, got %q", i, dev.Driver.IOMMUFD)
 		}
 		if dev.ACPI == nil || dev.ACPI.NodeSet != expectedNodeSets[i] {
 			t.Fatalf("expected host device %d to have ACPI nodeset %s, got %+v", i, expectedNodeSets[i], dev.ACPI)
@@ -724,8 +772,8 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettingsFromGrace
 	expectedNodeSets := []string{"0", "1"}
 	for i := range domain.Spec.Devices.HostDevices {
 		dev := domain.Spec.Devices.HostDevices[i]
-		if dev.Driver == nil || dev.Driver.IOMMUFD != "yes" {
-			t.Fatalf("expected host device %d to have iommufd enabled", i)
+		if dev.Driver != nil && dev.Driver.IOMMUFD != "" {
+			t.Fatalf("expected host device %d to skip iommufd for non-large MMIO device, got %q", i, dev.Driver.IOMMUFD)
 		}
 		if dev.ACPI == nil || dev.ACPI.NodeSet != expectedNodeSets[i] {
 			t.Fatalf("expected host device %d to have ACPI nodeset %s, got %+v", i, expectedNodeSets[i], dev.ACPI)
@@ -735,6 +783,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettingsFromGrace
 
 func TestApplyNUMAHostDeviceTopologyAcceptsGraceVirtualizationAnnotationWithSMMUv3Fields(t *testing.T) {
 	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return false }
 
 	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
 		domain := strings.TrimPrefix(addr.Domain, "0x")
@@ -782,8 +831,8 @@ func TestApplyNUMAHostDeviceTopologyAcceptsGraceVirtualizationAnnotationWithSMMU
 	ApplyNUMAHostDeviceTopology(vmi, domain)
 
 	dev := domain.Spec.Devices.HostDevices[0]
-	if dev.Driver == nil || dev.Driver.IOMMUFD != "yes" {
-		t.Fatalf("expected host device to keep iommufd injection with extended graceVirtualization payload")
+	if dev.Driver != nil && dev.Driver.IOMMUFD != "" {
+		t.Fatalf("expected host device to skip iommufd injection for non-large MMIO device, got %q", dev.Driver.IOMMUFD)
 	}
 	if dev.ACPI == nil || dev.ACPI.NodeSet != "0" {
 		t.Fatalf("expected host device ACPI nodeset to be injected, got %+v", dev.ACPI)
@@ -877,6 +926,7 @@ func hasArmSMMUv3QEMUArgs(domain *api.Domain) bool {
 
 func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsAndVCMDQ(t *testing.T) {
 	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
 
 	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
 		domain := strings.TrimPrefix(addr.Domain, "0x")
@@ -958,6 +1008,118 @@ func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsAndVCMDQ(t *testing.T) {
 	}
 }
 
+func TestApplyNUMAHostDeviceTopologyScopesVCMDQToDedicatedPXBBuses(t *testing.T) {
+	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) {
+		return 0, nil
+	}
+	getDevicePCITotalMMIOSizeFunc = func(bdf string) (uint64, error) {
+		if bdf == "0000:08:00.0" {
+			return largeMMIOPXBIsolationThreshold, nil
+		}
+		return 0, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: "arm64",
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3":true,"vcmdq":true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("ib0", "0x0000", "0x03"),
+					newTestPCIHostDevice("gpu0", "0x0000", "0x08"),
+				},
+			},
+		},
+	}
+
+	assignNUMAMapping(domain, map[int]int{0: 0})
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+	stubPCIPath("0000:08:00.0", []string{"0000:00:02.0", "0000:08:00.0"})
+
+	ApplyNUMAHostDeviceTopology(vmi, domain)
+
+	var pxbControllers int
+	for _, ctrl := range domain.Spec.Devices.Controllers {
+		if ctrl.Model == "pcie-expander-bus" {
+			pxbControllers++
+		}
+	}
+	if pxbControllers != 2 {
+		t.Fatalf("expected isolated PXB hierarchies per device in mixed Grace topology, got %d controllers", pxbControllers)
+	}
+
+	if len(domain.Spec.Devices.IOMMUs) == 0 {
+		t.Fatalf("expected at least one smmuv3 iommu entry, got %d", len(domain.Spec.Devices.IOMMUs))
+	}
+
+	var cmdqvOn, cmdqvOff int
+	var accelOn, accelOff int
+	var rilOffOnDedicated int
+	for _, iommu := range domain.Spec.Devices.IOMMUs {
+		if iommu.Model != "smmuv3" || iommu.Driver == nil {
+			continue
+		}
+		if iommu.Driver.CMDQV == "on" {
+			cmdqvOn++
+		} else {
+			cmdqvOff++
+		}
+		if iommu.Driver.Accel == "on" {
+			accelOn++
+			if iommu.Driver.CMDQV == "on" {
+				if iommu.Driver.RIL == "off" && iommu.Driver.ATS == "on" && iommu.Driver.PASID == "on" && iommu.Driver.OAS == "48" {
+					rilOffOnDedicated++
+				}
+			}
+		} else if iommu.Driver.Accel == "off" {
+			accelOff++
+		}
+	}
+
+	if cmdqvOn == 0 {
+		t.Fatalf("expected cmdqv enabled on at least one dedicated PXB bus")
+	}
+	if cmdqvOff != 0 {
+		t.Fatalf("did not expect shared/non-dedicated smmuv3 entries in mixed topology")
+	}
+	if accelOn == 0 {
+		t.Fatalf("expected accel=on on at least one dedicated PXB bus")
+	}
+	if accelOff != 0 {
+		t.Fatalf("did not expect accel=off when /dev/iommu is available")
+	}
+	if rilOffOnDedicated == 0 {
+		t.Fatalf("expected dedicated smmuv3 buses to keep accel features (ats=on,pasid=on,ril=off,oas=48)")
+	}
+}
+
 func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsWithoutVCMDQByDefault(t *testing.T) {
 	defer restoreNUMAHelpers()
 
@@ -1020,6 +1182,81 @@ func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsWithoutVCMDQByDefault(t *
 	}
 }
 
+func TestApplyNUMAHostDeviceTopologyFallsBackToSMMUv3AccelOffWithoutIOMMUDevice(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) {
+		return 0, nil
+	}
+	isIOMMUFDDeviceAvailableFunc = func() bool {
+		return false
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: "arm64",
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3":true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("ib0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	assignNUMAMapping(domain, map[int]int{0: 0})
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	ApplyNUMAHostDeviceTopology(vmi, domain)
+
+	if len(domain.Spec.Devices.IOMMUs) == 0 {
+		t.Fatalf("expected smmuv3 iommu entries to be generated")
+	}
+	for _, iommu := range domain.Spec.Devices.IOMMUs {
+		if iommu.Driver == nil {
+			t.Fatalf("expected iommu driver settings")
+		}
+		if iommu.Driver.Accel != "off" {
+			t.Fatalf("expected smmuv3 accel=off when /dev/iommu is unavailable, got %q", iommu.Driver.Accel)
+		}
+		if iommu.Driver.RIL != "on" {
+			t.Fatalf("expected smmuv3 ril=on when accel=off, got %q", iommu.Driver.RIL)
+		}
+		if iommu.Driver.ATS != "" || iommu.Driver.PASID != "" || iommu.Driver.CMDQV != "" || iommu.Driver.OAS != "" {
+			t.Fatalf("expected accel=off buses to omit ats/pasid/cmdqv/oas, got %+v", iommu.Driver)
+		}
+	}
+	for _, dev := range domain.Spec.Devices.HostDevices {
+		if dev.Driver != nil {
+			t.Fatalf("expected host device driver to be omitted when /dev/iommu is unavailable, got %+v", dev.Driver)
+		}
+	}
+}
+
 func TestCollectNUMAPXBPciBusesUsesControllerIndices(t *testing.T) {
 	domain := &api.Domain{
 		Spec: api.DomainSpec{
@@ -1057,6 +1294,7 @@ func TestCollectNUMAPXBPciBusesUsesControllerIndices(t *testing.T) {
 
 func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceGINodeSetsForLargeMMIOGPUs(t *testing.T) {
 	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
 
 	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
 		domain := strings.TrimPrefix(addr.Domain, "0x")
@@ -1147,8 +1385,117 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceGINodeSetsForLargeMMIOGPUs(
 	}
 }
 
+func TestApplyNUMAHostDeviceTopologyInjectsIOMMUFDOnlyForLargeMMIOGraceDevices(t *testing.T) {
+	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(bdf string) (int, error) {
+		switch bdf {
+		case "0000:03:00.0", "0000:08:00.0":
+			return 0, nil
+		case "0000:18:00.0", "0000:83:00.0":
+			return 1, nil
+		default:
+			return -1, fmt.Errorf("unexpected bdf %s", bdf)
+		}
+	}
+	getDevicePCITotalMMIOSizeFunc = func(bdf string) (uint64, error) {
+		switch bdf {
+		case "0000:08:00.0", "0000:18:00.0":
+			return largeMMIOPXBIsolationThreshold, nil
+		default:
+			return 0, nil
+		}
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: "arm64",
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("ib0", "0x0000", "0x03"),
+					newTestPCIHostDevice("gpu0", "0x0000", "0x08"),
+					newTestPCIHostDevice("ib1", "0x0000", "0x83"),
+					newTestPCIHostDevice("gpu1", "0x0000", "0x18"),
+				},
+			},
+		},
+	}
+
+	assignNUMAMapping(domain, map[int]int{0: 0, 1: 1})
+	stubPCIPath("0000:03:00.0", []string{"0000:00:03.0", "0000:03:00.0"})
+	stubPCIPath("0000:08:00.0", []string{"0000:00:08.0", "0000:08:00.0"})
+	stubPCIPath("0000:18:00.0", []string{"0000:00:18.0", "0000:18:00.0"})
+	stubPCIPath("0000:83:00.0", []string{"0000:80:03.0", "0000:83:00.0"})
+
+	ApplyNUMAHostDeviceTopology(vmi, domain)
+
+	type expectedHostDevice struct {
+		nodeSet string
+		iommufd string
+	}
+	expectedByBDF := map[string]expectedHostDevice{
+		"0000:03:00.0": {nodeSet: "0", iommufd: ""},
+		"0000:08:00.0": {nodeSet: "2-9", iommufd: "yes"},
+		"0000:18:00.0": {nodeSet: "10-17", iommufd: "yes"},
+		"0000:83:00.0": {nodeSet: "1", iommufd: ""},
+	}
+
+	for i := range domain.Spec.Devices.HostDevices {
+		dev := domain.Spec.Devices.HostDevices[i]
+		bdf := fmt.Sprintf("%s:%s:00.0",
+			strings.TrimPrefix(dev.Source.Address.Domain, "0x"),
+			strings.TrimPrefix(dev.Source.Address.Bus, "0x"),
+		)
+		expected, ok := expectedByBDF[bdf]
+		if !ok {
+			t.Fatalf("unexpected host device bdf %s", bdf)
+		}
+
+		if dev.ACPI == nil || dev.ACPI.NodeSet != expected.nodeSet {
+			t.Fatalf("expected host device %s to have ACPI nodeset %s, got %+v", bdf, expected.nodeSet, dev.ACPI)
+		}
+
+		if expected.iommufd == "" {
+			if dev.Driver != nil {
+				t.Fatalf("expected host device %s to have no driver element when iommufd is disabled, got %+v", bdf, dev.Driver)
+			}
+			continue
+		}
+		if dev.Driver == nil || dev.Driver.IOMMUFD != expected.iommufd {
+			t.Fatalf("expected host device %s to have iommufd %q, got %+v", bdf, expected.iommufd, dev.Driver)
+		}
+	}
+}
+
 func TestApplyNUMAHostDeviceTopologyAssignsUniqueGINodeSetsPerLargeMMIOGPU(t *testing.T) {
 	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
 
 	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
 		domain := strings.TrimPrefix(addr.Domain, "0x")
@@ -1354,6 +1701,7 @@ func restoreNUMAHelpers() {
 	getDevicePCIPathHierarchyFunc = hardware.GetDevicePCIPathHierarchy
 	getDeviceIOMMUGroupInfoFunc = hardware.GetDeviceIOMMUGroupInfo
 	getDevicePCITotalMMIOSizeFunc = getDevicePCITotalMMIOSize
+	isIOMMUFDDeviceAvailableFunc = isIOMMUFDDeviceAvailable
 	testPCIHierarchy = map[string][]string{}
 	setDefaultTopologyGrouping()
 }
