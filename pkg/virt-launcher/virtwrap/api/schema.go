@@ -746,6 +746,7 @@ type ACPIHostDev struct {
 type HostDevDriver struct {
 	XMLName xml.Name `xml:"driver"`
 	Iommufd string   `xml:"iommufd,attr,omitempty"`
+	FDGroup string   `xml:"fdgroup,attr,omitempty"`
 }
 
 // END HostDevice -----------------------------

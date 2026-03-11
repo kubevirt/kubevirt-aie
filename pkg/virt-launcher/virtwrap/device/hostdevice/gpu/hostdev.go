@@ -89,6 +89,7 @@ func newDecorateHook(name string, iommuPCI *iommupci.IommuPCI) func(hostDevice *
 		if *iommuPCI.IommufdEnabled {
 			hostDevice.Driver = &api.HostDevDriver{
 				Iommufd: "yes",
+				FDGroup: "iommu",
 			}
 		}
 
