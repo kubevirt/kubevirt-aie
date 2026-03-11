@@ -207,8 +207,6 @@ type LibvirtDomainManager struct {
 
 	// iommuFD holds the IOMMUFD file descriptor received from the device plugin
 	// via SCM_RIGHTS. A value of -1 means no IOMMUFD FD is available.
-	// TODO: Pass this FD to libvirt via virDomainFDAssociate(domain, "iommu", 1, &fd, 0)
-	// once libvirt supports the fdgroup-based IOMMUFD integration.
 	// See: https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainFDAssociate
 	iommuFD int
 }
@@ -1223,6 +1221,15 @@ func (l *LibvirtDomainManager) SyncVMI(vmi *v1.VirtualMachineInstance, allowEmul
 	// TODO blocked state
 	switch {
 	case cli.IsDown(domState) && !vmi.IsRunning() && !vmi.IsFinal():
+		// Associate IOMMUFD FD with the domain before starting.
+		// libvirt will use this FD (named "iommu") for hostdev elements
+		// that specify fdgroup='iommu' in their driver configuration.
+		if l.iommuFD >= 0 {
+			iommuFile := os.NewFile(uintptr(l.iommuFD), "iommufd")
+			if err := dom.FDAssociate("iommu", []os.File{*iommuFile}, 0); err != nil {
+				logger.Warningf("failed to associate IOMMUFD FD with domain: %v", err)
+			}
+		}
 		if err := l.startDomain(vmi, dom); err != nil {
 			return nil, err
 		}

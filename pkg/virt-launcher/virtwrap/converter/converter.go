@@ -1304,6 +1304,14 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		}
 	}
 
+	// TODO: create domain builder for iommufd and maybe a "isIOMMUFDEnabled()" helper func
+	if c.IommuPCI != nil && c.IommuPCI.IommufdEnabled != nil && *c.IommuPCI.IommufdEnabled {
+		domain.Spec.IOMMUFD = &api.IOMMUFD{
+			Enabled: "yes",
+			FDGroup: "iommu",
+		}
+	}
+
 	if vmi.Spec.Domain.Devices.AutoattachSerialConsole == nil || *vmi.Spec.Domain.Devices.AutoattachSerialConsole {
 		// Add mandatory console device
 		domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers, api.Controller{

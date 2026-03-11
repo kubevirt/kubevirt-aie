@@ -237,6 +237,7 @@ type DomainSpec struct {
 	IOThreads      *IOThreads      `xml:"iothreads,omitempty"`
 	LaunchSecurity *LaunchSecurity `xml:"launchSecurity,omitempty"`
 	OnReboot       string          `xml:"on_reboot,omitempty"`
+	IOMMUFD        *IOMMUFD        `xml:"iommufd,omitempty"`
 }
 
 const DomainOnRebootDestroy = "destroy"
@@ -1206,6 +1207,15 @@ type LaunchSecurity struct {
 }
 
 //END LaunchSecurity --------------------
+//BEGIN IOMMUFD --------------------
+
+type IOMMUFD struct {
+	XMLName xml.Name `xml:"iommufd"`
+	Enabled string   `xml:"enabled,attr"`
+	FDGroup string   `xml:"fdgroup,attr,omitempty"`
+}
+
+//END IOMMUFD --------------------
 //BEGIN Clock --------------------
 
 type Clock struct {
