@@ -31,6 +31,8 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/google/uuid"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
 	v1 "kubevirt.io/api/core/v1"
@@ -195,6 +197,32 @@ func (dpi *PCIDevicePlugin) Allocate(_ context.Context, r *pluginapi.AllocateReq
 		containerResponse.Devices = deviceSpecs
 		envVar := make(map[string]string)
 		envVar[resourceNameEnvVar] = strings.Join(allocatedDevices, ",")
+
+		// Create an IOMMUFD socket for FD passing to virt-launcher.
+		// The device plugin opens /dev/iommu, configures RLIMIT_MODE,
+		// and passes the FD to the unprivileged virt-launcher via SCM_RIGHTS.
+		// The socket is bind-mounted into the container at a fixed path so
+		// virt-launcher can find it.
+		if iommufdSuppored {
+			iommuFD, err := openAndConfigureIOMMUFD()
+			if err != nil {
+				logger.Warningf("failed to open/configure IOMMUFD: %v", err)
+			} else {
+				socketID := uuid.New().String()
+				hostSocketPath, err := createIOMMUFDSocket(iommuFD, socketID)
+				if err != nil {
+					logger.Warningf("failed to create IOMMUFD socket: %v", err)
+					// iommuFD ownership was not transferred to the goroutine, close it
+					unix.Close(iommuFD)
+				} else {
+					containerResponse.Mounts = append(containerResponse.Mounts, &pluginapi.Mount{
+						HostPath:      hostSocketPath,
+						ContainerPath: IOMMUFDContainerSocketPath,
+						ReadOnly:      false,
+					})
+				}
+			}
+		}
 
 		containerResponse.Envs = envVar
 		resp.ContainerResponses = append(resp.ContainerResponses, containerResponse)
