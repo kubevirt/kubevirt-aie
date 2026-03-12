@@ -87,6 +87,150 @@ type EFIConfiguration struct {
 	SecureLoader bool
 }
 
+func configureGraceEGMFileBackedMemory(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
+	if !graceEGMEnabled(vmi) {
+		return nil
+	}
+
+	hasHugepages := vmi.Spec.Domain.Memory != nil && vmi.Spec.Domain.Memory.Hugepages != nil
+	if hasHugepages {
+		return fmt.Errorf("egm requires EGM-backed file memory and does not support hugepages")
+	}
+
+	if domain.Spec.MemoryBacking == nil {
+		domain.Spec.MemoryBacking = &api.MemoryBacking{}
+	}
+
+	domain.Spec.MemoryBacking.HugePages = nil
+	domain.Spec.MemoryBacking.NoSharePages = nil
+	domain.Spec.MemoryBacking.Source = &api.MemoryBackingSource{Type: "file"}
+	domain.Spec.MemoryBacking.Access = &api.MemoryBackingAccess{Mode: "shared"}
+	domain.Spec.MemoryBacking.Allocation = &api.MemoryAllocation{Mode: api.MemoryAllocationModeImmediate}
+
+	return nil
+}
+
+func configureGraceEGMDomainMemoryLayout(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
+	if !graceEGMEnabled(vmi) {
+		return nil
+	}
+	if domain == nil {
+		return fmt.Errorf("domain is nil")
+	}
+
+	totalMemoryBytes := uint64(0)
+	memoryByGuestNUMANode := make(map[string]uint64)
+	egmDevicePaths := make(map[string]struct{})
+	egmDeviceCount := 0
+
+	for _, md := range domain.Spec.Devices.MemoryDevices {
+		if md.Model != "egm" || md.Target == nil {
+			continue
+		}
+
+		sizeBytes, err := domainMemoryToBytes(md.Target.Size)
+		if err != nil {
+			return err
+		}
+		totalMemoryBytes += sizeBytes
+		memoryByGuestNUMANode[md.Target.Node] += sizeBytes
+		if md.Source != nil && md.Source.Path != "" {
+			egmDevicePaths[md.Source.Path] = struct{}{}
+		}
+		egmDeviceCount++
+	}
+
+	if egmDeviceCount == 0 {
+		return fmt.Errorf("egm requires at least one EGM memory device from the Grace host-device topology path")
+	}
+
+	configuredMemory, err := vcpu.QuantityToByte(*vcpu.GetVirtualMemory(vmi))
+	if err != nil {
+		return err
+	}
+	// EGM backing size is host-node specific and is discovered after the VMI has
+	// already been scheduled and pod memory resources have been rendered. Keep the
+	// user-visible guest memory explicit and fail with the discovered size instead
+	// of silently changing only the libvirt domain memory at conversion time.
+	if configuredMemory.Value != totalMemoryBytes {
+		return fmt.Errorf("egm requires guest memory to match total EGM backing size%s: configured %s, expected %s",
+			formatEGMDevicePaths(egmDevicePaths), formatBytesForEGMError(configuredMemory.Value), formatBytesForEGMError(totalMemoryBytes))
+	}
+
+	totalMemory := api.Memory{Value: totalMemoryBytes, Unit: "b"}
+	domain.Spec.Memory = totalMemory
+	domain.Spec.CurrentMemory = &api.Memory{Value: totalMemoryBytes, Unit: "b"}
+	domain.Spec.MaxMemory = &api.MaxMemory{Value: totalMemoryBytes, Unit: "b"}
+
+	if domain.Spec.CPU.NUMA != nil {
+		for i := range domain.Spec.CPU.NUMA.Cells {
+			cell := &domain.Spec.CPU.NUMA.Cells[i]
+			bytesForNode, exists := memoryByGuestNUMANode[cell.ID]
+			if !exists {
+				continue
+			}
+
+			if bytesForNode%1024 != 0 {
+				return fmt.Errorf("egm memory for guest NUMA node %s must align to KiB, got %d bytes", cell.ID, bytesForNode)
+			}
+
+			cell.Memory = bytesForNode / 1024
+			cell.Unit = "KiB"
+		}
+	}
+
+	return nil
+}
+
+func formatEGMDevicePaths(paths map[string]struct{}) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	devicePaths := make([]string, 0, len(paths))
+	for path := range paths {
+		devicePaths = append(devicePaths, path)
+	}
+	slices.Sort(devicePaths)
+	return fmt.Sprintf(" from %s", strings.Join(devicePaths, ","))
+}
+
+func formatBytesForEGMError(value uint64) string {
+	const bytesPerMiB = uint64(1024 * 1024)
+	if value%bytesPerMiB == 0 {
+		return fmt.Sprintf("%dMi", value/bytesPerMiB)
+	}
+	return fmt.Sprintf("%d bytes", value)
+}
+
+func graceEGMEnabled(vmi *v1.VirtualMachineInstance) bool {
+	cfg := util.GetGraceVirtualizationConfig(vmi)
+	return cfg != nil && util.GraceFieldEnabled(cfg.EGM)
+}
+
+func shouldApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, c *ConverterContext) bool {
+	if c != nil && c.PCINUMAAwareTopologyEnabled {
+		return true
+	}
+	return graceEGMEnabled(vmi)
+}
+
+func domainMemoryToBytes(memory api.Memory) (uint64, error) {
+	switch memory.Unit {
+	case "", "b":
+		return memory.Value, nil
+	case "KiB":
+		return memory.Value * 1024, nil
+	case "MiB":
+		return memory.Value * 1024 * 1024, nil
+	case "GiB":
+		return memory.Value * 1024 * 1024 * 1024, nil
+	case "TiB":
+		return memory.Value * 1024 * 1024 * 1024 * 1024, nil
+	default:
+		return 0, fmt.Errorf("unsupported memory unit %q", memory.Unit)
+	}
+}
+
 type ConverterContext struct {
 	Architecture                    arch.Converter
 	AllowEmulation                  bool
@@ -440,6 +584,7 @@ func SetDriverCacheMode(disk *api.Disk, directIOChecker DirectIOChecker) error {
 		path = disk.Source.File
 	case disk.Source.Dev != "":
 		path = disk.Source.Dev
+		isBlockDev = true
 	// handle empty cdrom
 	case disk.Device == "cdrom":
 		return nil
@@ -1717,6 +1862,9 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			}
 		}
 	}
+	if err := configureGraceEGMFileBackedMemory(vmi, domain); err != nil {
+		return err
+	}
 
 	volumeIndices := map[string]int{}
 	volumes := map[string]*v1.Volume{}
@@ -1960,10 +2108,16 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.GPUHostDevices...)
 	domain.Spec.Devices.HostDevices = append(domain.Spec.Devices.HostDevices, c.SRIOVDevices...)
 
-	// Apply host device NUMA topology based on VMI spec and node topology
-	// Only apply if PCINUMAAwareTopology feature gate is enabled
-	if c.PCINUMAAwareTopologyEnabled {
-		hostdevice.ApplyNUMAHostDeviceTopology(vmi, domain)
+	// Apply host device NUMA topology based on VMI spec and node topology.
+	// EGM also uses this path because it binds GPU hostdev aliases to libvirt
+	// EGM memory devices even when the generic PCI NUMA feature gate is off.
+	if shouldApplyNUMAHostDeviceTopology(vmi, c) {
+		if err := hostdevice.ApplyNUMAHostDeviceTopology(vmi, domain); err != nil {
+			return err
+		}
+	}
+	if err := configureGraceEGMDomainMemoryLayout(vmi, domain); err != nil {
+		return err
 	}
 
 	if vmi.Spec.Domain.CPU == nil || vmi.Spec.Domain.CPU.Model == "" {

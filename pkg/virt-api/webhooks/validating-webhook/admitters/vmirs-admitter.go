@@ -89,6 +89,14 @@ func ValidateVMIRSSpec(field *k8sfield.Path, spec *v1.VirtualMachineInstanceRepl
 		})
 	}
 	causes = append(causes, ValidateVirtualMachineInstanceSpec(field.Child("template", "spec"), &spec.Template.Spec, config)...)
+	causes = append(causes, validateGraceVirtualizationAnnotation(
+		field.Child("template", "metadata"),
+		field.Child("template", "spec"),
+		spec.Template.ObjectMeta.Annotations,
+		&spec.Template.Spec,
+		config,
+	)...)
+	causes = filterNUMAHugepagesRequirementForGraceEGM(causes, field.Child("template", "spec"), spec.Template.ObjectMeta.Annotations)
 
 	selector, err := metav1.LabelSelectorAsSelector(spec.Selector)
 	if err != nil {

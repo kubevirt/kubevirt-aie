@@ -35,6 +35,7 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/testutils"
 	"kubevirt.io/kubevirt/pkg/virt-api/webhooks"
+	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 )
 
 var _ = Describe("Validating VMIRS Admitter", func() {
@@ -141,6 +142,61 @@ var _ = Describe("Validating VMIRS Admitter", func() {
 		resp := vmirsAdmitter.Admit(context.Background(), ar)
 		Expect(resp.Allowed).To(BeTrue())
 	})
+
+	It("should reject GraceIOVirtualization annotation when feature gate is disabled", func() {
+		vmirs := newValidVMIRS()
+		vmirs.Spec.Template.ObjectMeta.Annotations = map[string]string{
+			v1.GraceVirtualizationAnnotation: `{}`,
+		}
+		vmirsBytes, _ := json.Marshal(&vmirs)
+
+		ar := &admissionv1.AdmissionReview{
+			Request: &admissionv1.AdmissionRequest{
+				Resource: webhooks.VirtualMachineInstanceReplicaSetGroupVersionResource,
+				Object: runtime.RawExtension{
+					Raw: vmirsBytes,
+				},
+			},
+		}
+
+		resp := vmirsAdmitter.Admit(context.Background(), ar)
+		Expect(resp.Allowed).To(BeFalse())
+		Expect(resp.Result.Details.Causes).To(ContainElement(SatisfyAll(
+			HaveField("Field", "spec.template.metadata.annotations"),
+			HaveField("Message", ContainSubstring("GraceIOVirtualization feature gate is not enabled")),
+		)))
+	})
+
+	It("should validate GraceIOVirtualization annotation on VMIRS templates", func() {
+		config, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+			DeveloperConfiguration: &v1.DeveloperConfiguration{
+				FeatureGates: []string{featuregate.MultiArchitecture, featuregate.GraceIOVirtualization},
+			},
+		})
+		vmirsAdmitter := &VMIRSAdmitter{ClusterConfig: config}
+		vmirs := newValidVMIRS()
+		vmirs.Spec.Template.Spec.Architecture = "arm64"
+		vmirs.Spec.Template.ObjectMeta.Annotations = map[string]string{
+			v1.GraceVirtualizationAnnotation: `{"smmuv3":false,"egm":true}`,
+		}
+		vmirsBytes, _ := json.Marshal(&vmirs)
+
+		ar := &admissionv1.AdmissionReview{
+			Request: &admissionv1.AdmissionRequest{
+				Resource: webhooks.VirtualMachineInstanceReplicaSetGroupVersionResource,
+				Object: runtime.RawExtension{
+					Raw: vmirsBytes,
+				},
+			},
+		}
+
+		resp := vmirsAdmitter.Admit(context.Background(), ar)
+		Expect(resp.Allowed).To(BeFalse())
+		Expect(resp.Result.Details.Causes).To(ContainElement(SatisfyAll(
+			HaveField("Field", "spec.template.metadata.annotations"),
+			HaveField("Message", ContainSubstring("egm requires smmuv3=true")),
+		)))
+	})
 })
 
 type virtualMachineBuilder struct {
@@ -187,5 +243,27 @@ func (b *virtualMachineBuilder) BuildTemplate() *v1.VirtualMachineInstanceTempla
 func newVirtualMachineBuilder() *virtualMachineBuilder {
 	return &virtualMachineBuilder{
 		labels: map[string]string{},
+	}
+}
+
+func newValidVMIRS() *v1.VirtualMachineInstanceReplicaSet {
+	return &v1.VirtualMachineInstanceReplicaSet{
+		Spec: v1.VirtualMachineInstanceReplicaSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"match": "me"},
+			},
+			Template: newVirtualMachineBuilder().
+				WithDisk(v1.Disk{
+					Name: "testdisk",
+				}).
+				WithVolume(v1.Volume{
+					Name: "testdisk",
+					VolumeSource: v1.VolumeSource{
+						ContainerDisk: testutils.NewFakeContainerDiskSource(),
+					},
+				}).
+				WithLabel("match", "me").
+				BuildTemplate(),
+		},
 	}
 }

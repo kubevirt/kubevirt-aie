@@ -380,3 +380,95 @@ func LookupDeviceVCPUAffinity(pciAddress string, domainSpec *api.DomainSpec) ([]
 	}
 	return alignedVCPUList, nil
 }
+
+// EGMDeviceInfo describes a single EGM character device and its associated GPU.
+type EGMDeviceInfo struct {
+	DevPath      string // e.g. "/dev/egm4"
+	GPUBDFs      []string
+	EGMSizeBytes uint64
+	NUMANode     int
+}
+
+// sysClassEGMPath can be overridden in tests.
+var sysClassEGMPath = "/sys/class/egm"
+
+// DiscoverEGMDevices reads /sys/class/egm/egm* to discover available EGM
+// character devices and their GPU associations.
+func DiscoverEGMDevices() ([]EGMDeviceInfo, error) {
+	entries, err := os.ReadDir(sysClassEGMPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading EGM sysfs: %w", err)
+	}
+
+	var devices []EGMDeviceInfo
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "egm") {
+			continue
+		}
+		dir := filepath.Join(sysClassEGMPath, name)
+
+		gpuRaw, err := os.ReadFile(filepath.Join(dir, "gpu_devices"))
+		if err != nil {
+			continue
+		}
+		gpuFields := strings.Fields(strings.TrimSpace(string(gpuRaw)))
+		gpuBDFs := make([]string, 0, len(gpuFields))
+		for _, gpuField := range gpuFields {
+			gpuBDF, err := canonicalizePCIAddress(gpuField)
+			if err != nil {
+				return nil, fmt.Errorf("invalid gpu_devices entry %q for %s: %w", gpuField, name, err)
+			}
+			gpuBDFs = append(gpuBDFs, gpuBDF)
+		}
+		if len(gpuBDFs) == 0 {
+			continue
+		}
+
+		sizeRaw, err := os.ReadFile(filepath.Join(dir, "egm_size"))
+		if err != nil {
+			continue
+		}
+		sizeStr := strings.TrimSpace(string(sizeRaw))
+		sizeBytes, err := strconv.ParseUint(strings.TrimPrefix(sizeStr, "0x"), 16, 64)
+		if err != nil {
+			sizeBytes, err = strconv.ParseUint(sizeStr, 10, 64)
+			if err != nil {
+				continue
+			}
+		}
+
+		numaNode := -1
+		if len(gpuBDFs) > 0 {
+			n, nerr := GetDeviceNumaNodeInt(gpuBDFs[0])
+			if nerr == nil {
+				numaNode = n
+			}
+		}
+
+		devices = append(devices, EGMDeviceInfo{
+			DevPath:      filepath.Join("/dev", name),
+			GPUBDFs:      gpuBDFs,
+			EGMSizeBytes: sizeBytes,
+			NUMANode:     numaNode,
+		})
+	}
+	return devices, nil
+}
+
+// FindEGMDeviceForGPU returns the EGM device info for a given GPU BDF, or nil
+// if no EGM device is associated with that GPU.
+func FindEGMDeviceForGPU(bdf string, egmDevices []EGMDeviceInfo) *EGMDeviceInfo {
+	normalized := strings.ToLower(strings.TrimSpace(bdf))
+	for i := range egmDevices {
+		for _, gpuBDF := range egmDevices[i].GPUBDFs {
+			if strings.ToLower(strings.TrimSpace(gpuBDF)) == normalized {
+				return &egmDevices[i]
+			}
+		}
+	}
+	return nil
+}

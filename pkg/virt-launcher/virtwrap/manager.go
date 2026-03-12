@@ -291,6 +291,15 @@ func newLibvirtDomainManager(connection cli.Connection, virtShareDir, ephemeralD
 	return &manager, nil
 }
 
+func findVirtioMemDevice(spec *api.DomainSpec) *api.MemoryDevice {
+	for i := range spec.Devices.MemoryDevices {
+		if spec.Devices.MemoryDevices[i].Model == "virtio-mem" {
+			return &spec.Devices.MemoryDevices[i]
+		}
+	}
+	return nil
+}
+
 func getDomainSpec(dom cli.VirDomain) (*api.DomainSpec, error) {
 	var newSpec api.DomainSpec
 	xmlstr, err := dom.GetXMLDesc(0)
@@ -345,10 +354,10 @@ func (l *LibvirtDomainManager) UpdateGuestMemory(vmi *v1.VirtualMachineInstance)
 		return fmt.Errorf("%s: %v", errMsgPrefix, err)
 	}
 
-	if spec.Devices.Memory != nil {
-		spec.Devices.Memory.Target.Requested = memoryDevice.Target.Requested
+	if existingVirtioMem := findVirtioMemDevice(spec); existingVirtioMem != nil {
+		existingVirtioMem.Target.Requested = memoryDevice.Target.Requested
 
-		memoryDeviceXML, err := xml.Marshal(spec.Devices.Memory)
+		memoryDeviceXML, err := xml.Marshal(existingVirtioMem)
 		if err != nil {
 			log.Log.Reason(err).Error("marshalling target virtio-mem failed")
 			return err
@@ -850,6 +859,10 @@ func (l *LibvirtDomainManager) preStartHook(vmi *v1.VirtualMachineInstance, doma
 		return domain, fmt.Errorf("failed to craete downwardMetric disk: %v", err)
 	}
 
+	// Grace EGM guests currently require buffered/threaded disk I/O. Avoid
+	// auto-selecting direct/native defaults unless the user explicitly chose them.
+	applyGraceEGMSafeDiskDefaults(vmi, &domain.Spec)
+
 	// set drivers cache mode
 	for i := range domain.Spec.Devices.Disks {
 		err := converter.SetDriverCacheMode(&domain.Spec.Devices.Disks[i], l.directIOChecker)
@@ -867,6 +880,34 @@ func (l *LibvirtDomainManager) preStartHook(vmi *v1.VirtualMachineInstance, doma
 	expandDiskImagesOffline(vmi, domain)
 
 	return domain, err
+}
+
+func isGraceEGMEnabled(vmi *v1.VirtualMachineInstance) bool {
+	cfg := kutil.GetGraceVirtualizationConfig(vmi)
+	return cfg != nil && kutil.GraceFieldEnabled(cfg.EGM)
+}
+
+func applyGraceEGMSafeDiskDefaults(vmi *v1.VirtualMachineInstance, domainSpec *api.DomainSpec) {
+	if !isGraceEGMEnabled(vmi) || domainSpec == nil {
+		return
+	}
+
+	for i := range domainSpec.Devices.Disks {
+		applyGraceEGMSafeDiskDefaultsToDisk(vmi, &domainSpec.Devices.Disks[i])
+	}
+}
+
+func applyGraceEGMSafeDiskDefaultsToDisk(vmi *v1.VirtualMachineInstance, disk *api.Disk) {
+	if !isGraceEGMEnabled(vmi) || disk == nil || disk.Device != "disk" || disk.ReadOnly != nil || disk.Driver == nil {
+		return
+	}
+
+	if disk.Driver.Cache == "" {
+		disk.Driver.Cache = string(v1.CacheWriteThrough)
+	}
+	if disk.Driver.IO == "" {
+		disk.Driver.IO = v1.IOThreads
+	}
 }
 
 func expandDiskImagesOffline(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
@@ -1385,6 +1426,7 @@ func (l *LibvirtDomainManager) syncDisks(
 			continue
 		}
 		logger.V(1).Infof("Attaching disk %s, target %s", attachDisk.Alias.GetName(), attachDisk.Target.Device)
+		applyGraceEGMSafeDiskDefaultsToDisk(vmi, &attachDisk)
 		// set drivers cache mode
 		err = converter.SetDriverCacheMode(&attachDisk, l.directIOChecker)
 		if err != nil {

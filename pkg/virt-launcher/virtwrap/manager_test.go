@@ -1753,22 +1753,24 @@ var _ = Describe("Manager", func() {
 
 				domainSpec = &api.DomainSpec{
 					Devices: api.Devices{
-						Memory: &api.MemoryDevice{
-							Model: "virtio-mem",
-							Alias: api.NewUserDefinedAlias("virtio-mem"),
-							Address: &api.Address{
-								Type:     "pci",
-								Domain:   "0x0000",
-								Bus:      "0x02",
-								Slot:     "0x00",
-								Function: "0x0",
-							},
-							Target: &api.MemoryTarget{
-								Node:      "0",
-								Address:   &api.MemoryAddress{Base: "0x100000000"},
-								Size:      size,
-								Requested: requested,
-								Block:     block,
+						MemoryDevices: []api.MemoryDevice{
+							{
+								Model: "virtio-mem",
+								Alias: api.NewUserDefinedAlias("virtio-mem"),
+								Address: &api.Address{
+									Type:     "pci",
+									Domain:   "0x0000",
+									Bus:      "0x02",
+									Slot:     "0x00",
+									Function: "0x0",
+								},
+								Target: &api.MemoryTarget{
+									Node:      "0",
+									Address:   &api.MemoryAddress{Base: "0x100000000"},
+									Size:      size,
+									Requested: &requested,
+									Block:     &block,
+								},
 							},
 						},
 					},
@@ -1784,9 +1786,9 @@ var _ = Describe("Manager", func() {
 				memoryDevice, err := memory.BuildMemoryDevice(vmi)
 				Expect(err).ToNot(HaveOccurred())
 
-				domainSpec.Devices.Memory.Target.Requested = memoryDevice.Target.Requested
+				domainSpec.Devices.MemoryDevices[0].Target.Requested = memoryDevice.Target.Requested
 
-				memoryDeviceXML, err := xml.Marshal(domainSpec.Devices.Memory)
+				memoryDeviceXML, err := xml.Marshal(&domainSpec.Devices.MemoryDevices[0])
 				Expect(err).ToNot(HaveOccurred())
 
 				attachFlags := libvirt.DOMAIN_DEVICE_MODIFY_LIVE
@@ -3502,6 +3504,102 @@ var _ = Describe("migratableDomXML", func() {
 })
 
 var _ = Describe("Manager helper functions", func() {
+	Context("applyGraceEGMSafeDiskDefaults", func() {
+		It("should default writable disks to writethrough and threads for Grace EGM", func() {
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Annotations = map[string]string{
+				v1.GraceVirtualizationAnnotation: `{"smmuv3":true,"egm":true}`,
+			}
+			domainSpec := &api.DomainSpec{
+				Devices: api.Devices{
+					Disks: []api.Disk{
+						{
+							Device: "disk",
+							Driver: &api.DiskDriver{},
+						},
+					},
+				},
+			}
+
+			applyGraceEGMSafeDiskDefaults(vmi, domainSpec)
+
+			Expect(domainSpec.Devices.Disks[0].Driver.Cache).To(Equal(string(v1.CacheWriteThrough)))
+			Expect(domainSpec.Devices.Disks[0].Driver.IO).To(Equal(v1.IOThreads))
+		})
+
+		It("should preserve user-selected disk cache and io", func() {
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Annotations = map[string]string{
+				v1.GraceVirtualizationAnnotation: `{"smmuv3":true,"egm":true}`,
+			}
+			domainSpec := &api.DomainSpec{
+				Devices: api.Devices{
+					Disks: []api.Disk{
+						{
+							Device: "disk",
+							Driver: &api.DiskDriver{
+								Cache: string(v1.CacheWriteBack),
+								IO:    v1.IONative,
+							},
+						},
+					},
+				},
+			}
+
+			applyGraceEGMSafeDiskDefaults(vmi, domainSpec)
+
+			Expect(domainSpec.Devices.Disks[0].Driver.Cache).To(Equal(string(v1.CacheWriteBack)))
+			Expect(domainSpec.Devices.Disks[0].Driver.IO).To(Equal(v1.IONative))
+		})
+
+		It("should ignore read-only and non-disk devices", func() {
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Annotations = map[string]string{
+				v1.GraceVirtualizationAnnotation: `{"smmuv3":true,"egm":true}`,
+			}
+			domainSpec := &api.DomainSpec{
+				Devices: api.Devices{
+					Disks: []api.Disk{
+						{
+							Device:   "disk",
+							Driver:   &api.DiskDriver{},
+							ReadOnly: &api.ReadOnly{},
+						},
+						{
+							Device: "cdrom",
+							Driver: &api.DiskDriver{},
+						},
+					},
+				},
+			}
+
+			applyGraceEGMSafeDiskDefaults(vmi, domainSpec)
+
+			Expect(domainSpec.Devices.Disks[0].Driver.Cache).To(BeEmpty())
+			Expect(domainSpec.Devices.Disks[0].Driver.IO).To(BeEmpty())
+			Expect(domainSpec.Devices.Disks[1].Driver.Cache).To(BeEmpty())
+			Expect(domainSpec.Devices.Disks[1].Driver.IO).To(BeEmpty())
+		})
+
+		It("should ignore VMI without Grace EGM enabled", func() {
+			vmi := newVMI(testNamespace, testVmName)
+			domainSpec := &api.DomainSpec{
+				Devices: api.Devices{
+					Disks: []api.Disk{
+						{
+							Device: "disk",
+							Driver: &api.DiskDriver{},
+						},
+					},
+				},
+			}
+
+			applyGraceEGMSafeDiskDefaults(vmi, domainSpec)
+
+			Expect(domainSpec.Devices.Disks[0].Driver.Cache).To(BeEmpty())
+			Expect(domainSpec.Devices.Disks[0].Driver.IO).To(BeEmpty())
+		})
+	})
 
 	Context("getVMIEphemeralDisksTotalSize", func() {
 

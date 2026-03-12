@@ -83,6 +83,19 @@ var _ = Describe("NumaPlacement", func() {
 		Expect(numaMapping(givenVMI, givenSpec, givenTopology)).ToNot(Succeed())
 	})
 
+	It("should prepare Grace EGM numa topology without hugepages", func() {
+		givenVMI.Annotations = map[string]string{
+			v1.GraceVirtualizationAnnotation: `{"smmuv3":true,"egm":true}`,
+		}
+		expectedGraceSpec := expectedSpec.DeepCopy()
+		expectedGraceSpec.NUMATune = nil
+
+		Expect(numaMappingForGraceEGM(givenVMI, givenSpec, givenTopology)).To(Succeed())
+		Expect(givenSpec.CPUTune).To(Equal(expectedSpec.CPUTune))
+		Expect(givenSpec.NUMATune).To(BeNil())
+		Expect(givenSpec.CPU).To(Equal(expectedGraceSpec.CPU))
+	})
+
 	DescribeTable("it should do nothing", func(givenTopology *cmdv1.Topology) {
 		expectedSpec := givenSpec.DeepCopy()
 		Expect(numaMapping(givenVMI, givenSpec, givenTopology)).To(Succeed())

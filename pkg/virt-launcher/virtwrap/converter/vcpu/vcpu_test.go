@@ -11,6 +11,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	corev1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
@@ -212,6 +214,47 @@ var _ = Describe("VCPU pinning", func() {
 			Expect(domain.Spec.CPU.Topology.Cores).To(Equal(uint32(1)))
 			Expect(domain.Spec.CPU.Topology.Threads).To(Equal(uint32(1)))
 			Expect(domain.Spec.VCPUs).To(BeNil())
+		})
+
+		It("builds strict NUMA topology for Grace EGM without guestMappingPassthrough", func() {
+			domain := &api.Domain{
+				Spec: api.DomainSpec{
+					CPU: api.CPU{
+						Topology: &api.CPUTopology{
+							Sockets: 2,
+							Cores:   1,
+							Threads: 1,
+						},
+					},
+				},
+			}
+			guestMemory := resource.MustParse("113792Mi")
+			vmi := &corev1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						corev1.GraceVirtualizationAnnotation: `{"smmuv3":true,"egm":true}`,
+					},
+				},
+				Spec: corev1.VirtualMachineInstanceSpec{
+					Domain: corev1.DomainSpec{
+						CPU: &corev1.CPU{
+							Sockets:               2,
+							Cores:                 1,
+							Threads:               1,
+							DedicatedCPUPlacement: true,
+						},
+						Memory: &corev1.Memory{
+							Guest: &guestMemory,
+						},
+					},
+				},
+			}
+			topology := hostTopology(2, 1, 0, 1)
+			err := AdjustDomainForTopologyAndCPUSet(domain, vmi, topology, []int{0, 1}, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(domain.Spec.CPU.NUMA).ToNot(BeNil())
+			Expect(domain.Spec.NUMATune).To(BeNil())
+			Expect(domain.Spec.CPU.NUMA.Cells).To(HaveLen(2))
 		})
 	})
 })

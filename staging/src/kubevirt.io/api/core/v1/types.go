@@ -1426,7 +1426,8 @@ const (
 	// Supported optional keys:
 	// - smmuv3 requests SMMUv3 IOMMU wiring.
 	// - vcmdq requests vCMDQ acceleration; requires smmuv3=true.
-	// - egm requests EGM wiring; requires smmuv3=true.
+	// - egm requests EGM wiring; requires smmuv3=true and explicit guest memory equal to
+	//   the total EGM backing size selected for passthrough.
 	//
 	// Omit the annotation entirely for ordinary VMI behavior. Use {} to request only baseline Grace host-device
 	// wiring; in that case smmuv3, vcmdq, and egm all default to false. The annotation requires the

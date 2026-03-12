@@ -122,6 +122,7 @@ func (admitter *VMICreateAdmitter) Admit(_ context.Context, ar *admissionv1.Admi
 	}
 
 	causes = append(causes, ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("spec"), &vmi.Spec, admitter.ClusterConfig)...)
+	causes = filterNUMAHugepagesRequirementForGraceEGM(causes, k8sfield.NewPath("spec"), vmi.Annotations)
 	// We only want to validate that volumes are mapped to disks or filesystems during VMI admittance, thus this logic is seperated from the above call that is shared with the VM admitter.
 	causes = append(causes, validateVirtualMachineInstanceSpecVolumeDisks(k8sfield.NewPath("spec"), &vmi.Spec)...)
 	causes = append(causes, ValidateVirtualMachineInstanceMandatoryFields(k8sfield.NewPath("spec"), &vmi.Spec)...)
@@ -1309,10 +1310,34 @@ func validateGraceVirtualizationAnnotation(metadataField, specField *k8sfield.Pa
 			Field:   metadataField.Child("annotations").String(),
 		})
 	}
+	if util.GraceFieldEnabled(cfg.EGM) && (spec.Domain.CPU == nil || !spec.Domain.CPU.DedicatedCPUPlacement) {
+		causes = append(causes, metav1.StatusCause{
+			Type: metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: egm requires domain.cpu.dedicatedCpuPlacement=true",
+				annotationPath),
+			Field: specField.Child("domain", "cpu", "dedicatedCpuPlacement").String(),
+		})
+	}
+	if util.GraceFieldEnabled(cfg.EGM) && (spec.Domain.Memory == nil || spec.Domain.Memory.Guest == nil) {
+		causes = append(causes, metav1.StatusCause{
+			Type: metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: egm requires domain.memory.guest to be set to the total EGM backing size",
+				annotationPath),
+			Field: specField.Child("domain", "memory", "guest").String(),
+		})
+	}
+	if util.GraceFieldEnabled(cfg.EGM) && spec.Domain.Memory != nil && spec.Domain.Memory.Hugepages != nil {
+		causes = append(causes, metav1.StatusCause{
+			Type: metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("invalid entry %s: egm requires EGM-backed file memory and does not support domain.memory.hugepages",
+				annotationPath),
+			Field: specField.Child("domain", "memory", "hugepages").String(),
+		})
+	}
 	if util.GraceFieldEnabled(cfg.VCMDQ) && util.GraceFieldEnabled(cfg.SMMUv3) && !util.GraceFieldEnabled(cfg.EGM) && !hasHugepagesConfigured(spec) {
 		causes = append(causes, metav1.StatusCause{
 			Type: metav1.CauseTypeFieldValueInvalid,
-			Message: fmt.Sprintf("invalid entry %s: vcmdq requires hugepages unless egm=true",
+			Message: fmt.Sprintf("invalid entry %s: vcmdq requires domain.memory.hugepages unless egm=true",
 				annotationPath),
 			Field: specField.Child("domain", "memory", "hugepages").String(),
 		})

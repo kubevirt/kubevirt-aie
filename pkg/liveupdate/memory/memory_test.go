@@ -131,8 +131,8 @@ var _ = Describe("LiveUpdate Memory", func() {
 					Target: &api.MemoryTarget{
 						Size:      size,
 						Node:      "0",
-						Block:     block,
-						Requested: requested,
+						Block:     &block,
+						Requested: &requested,
 					},
 				}))
 			},

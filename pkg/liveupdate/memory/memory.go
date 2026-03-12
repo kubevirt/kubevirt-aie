@@ -135,8 +135,8 @@ func BuildMemoryDevice(vmi *v1.VirtualMachineInstance) (*api.MemoryDevice, error
 		Target: &api.MemoryTarget{
 			Size:      pluggableMemorySize,
 			Node:      "0",
-			Block:     api.Memory{Unit: "b", Value: uint64(blockAlignment)},
-			Requested: pluggableMemoryRequested,
+			Block:     &api.Memory{Unit: "b", Value: uint64(blockAlignment)},
+			Requested: &pluggableMemoryRequested,
 		},
 	}, nil
 }

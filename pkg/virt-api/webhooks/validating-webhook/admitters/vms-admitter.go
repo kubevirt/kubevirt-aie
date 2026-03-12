@@ -226,6 +226,7 @@ func ValidateVirtualMachineSpec(field *k8sfield.Path, spec *v1.VirtualMachineSpe
 		&spec.Template.Spec,
 		config,
 	)...)
+	causes = filterNUMAHugepagesRequirementForGraceEGM(causes, field.Child("template", "spec"), spec.Template.ObjectMeta.Annotations)
 
 	causes = append(causes, storageadmitters.ValidateDataVolumeTemplate(field, spec)...)
 	causes = append(causes, validateRunStrategy(field, spec, config)...)
@@ -442,6 +443,7 @@ func (admitter *VMsAdmitter) validateVolumeRequests(ctx context.Context, vm *v1.
 
 	// this simulates injecting the changes into the VMI template and validates it will work.
 	causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("spec", "template", "spec"), newSpec, admitter.ClusterConfig)
+	causes = filterNUMAHugepagesRequirementForGraceEGM(causes, k8sfield.NewPath("spec", "template", "spec"), vm.Spec.Template.ObjectMeta.Annotations)
 	if len(causes) > 0 {
 		return causes, nil
 	}
@@ -449,6 +451,7 @@ func (admitter *VMsAdmitter) validateVolumeRequests(ctx context.Context, vm *v1.
 	// This simulates injecting the changes directly into the vmi, if the vmi exists
 	if vmiExists {
 		causes := ValidateVirtualMachineInstanceSpec(k8sfield.NewPath("spec", "template", "spec"), &vmi.Spec, admitter.ClusterConfig)
+		causes = filterNUMAHugepagesRequirementForGraceEGM(causes, k8sfield.NewPath("spec", "template", "spec"), vmi.Annotations)
 		if len(causes) > 0 {
 			return causes, nil
 		}

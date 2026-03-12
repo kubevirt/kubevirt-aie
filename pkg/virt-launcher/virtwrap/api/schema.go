@@ -448,7 +448,7 @@ type Memory struct {
 type MaxMemory struct {
 	Value uint64 `xml:",chardata"`
 	Unit  string `xml:"unit,attr"`
-	Slots uint64 `xml:"slots,attr"`
+	Slots uint64 `xml:"slots,attr,omitempty"`
 }
 
 // MemoryBacking mirroring libvirt XML under https://libvirt.org/formatdomain.html#elementsMemoryBacking
@@ -499,44 +499,51 @@ type MemoryAddress struct {
 
 type MemoryTarget struct {
 	Size      Memory         `xml:"size"`
-	Requested Memory         `xml:"requested"`
-	Current   Memory         `xml:"current"`
+	Requested *Memory        `xml:"requested,omitempty"`
+	Current   *Memory        `xml:"current,omitempty"`
 	Node      string         `xml:"node"`
-	Block     Memory         `xml:"block"`
+	Block     *Memory        `xml:"block,omitempty"`
 	Address   *MemoryAddress `xml:"address,omitempty"`
+	PCIDev    string         `xml:"pciDev,omitempty"`
+}
+
+type MemoryDeviceSource struct {
+	Path string `xml:"path"`
 }
 
 type MemoryDevice struct {
-	XMLName xml.Name      `xml:"memory"`
-	Model   string        `xml:"model,attr"`
-	Target  *MemoryTarget `xml:"target"`
-	Alias   *Alias        `xml:"alias,omitempty"`
-	Address *Address      `xml:"address,omitempty"`
+	XMLName xml.Name            `xml:"memory"`
+	Model   string              `xml:"model,attr"`
+	Access  string              `xml:"access,attr,omitempty"`
+	Source  *MemoryDeviceSource `xml:"source,omitempty"`
+	Target  *MemoryTarget       `xml:"target"`
+	Alias   *Alias              `xml:"alias,omitempty"`
+	Address *Address            `xml:"address,omitempty"`
 }
 
 type Devices struct {
-	Emulator     string             `xml:"emulator,omitempty"`
-	Interfaces   []Interface        `xml:"interface"`
-	Channels     []Channel          `xml:"channel"`
-	HostDevices  []HostDevice       `xml:"hostdev,omitempty"`
-	IOMMUs       []IOMMU            `xml:"iommu,omitempty"`
-	PanicDevices []PanicDevice      `xml:"panic,omitempty"`
-	Controllers  []Controller       `xml:"controller,omitempty"`
-	Video        []Video            `xml:"video"`
-	Graphics     []Graphics         `xml:"graphics"`
-	Ballooning   *MemBalloon        `xml:"memballoon,omitempty"`
-	Disks        []Disk             `xml:"disk"`
-	Inputs       []Input            `xml:"input"`
-	Serials      []Serial           `xml:"serial"`
-	Consoles     []Console          `xml:"console"`
-	Watchdogs    []Watchdog         `xml:"watchdog,omitempty"`
-	Rng          *Rng               `xml:"rng,omitempty"`
-	Filesystems  []FilesystemDevice `xml:"filesystem,omitempty"`
-	Redirs       []RedirectedDevice `xml:"redirdev,omitempty"`
-	SoundCards   []SoundCard        `xml:"sound,omitempty"`
-	TPMs         []TPM              `xml:"tpm,omitempty"`
-	VSOCK        *VSOCK             `xml:"vsock,omitempty"`
-	Memory       *MemoryDevice      `xml:"memory,omitempty"`
+	Emulator      string             `xml:"emulator,omitempty"`
+	Interfaces    []Interface        `xml:"interface"`
+	Channels      []Channel          `xml:"channel"`
+	HostDevices   []HostDevice       `xml:"hostdev,omitempty"`
+	IOMMUs        []IOMMU            `xml:"iommu,omitempty"`
+	PanicDevices  []PanicDevice      `xml:"panic,omitempty"`
+	Controllers   []Controller       `xml:"controller,omitempty"`
+	Video         []Video            `xml:"video"`
+	Graphics      []Graphics         `xml:"graphics"`
+	Ballooning    *MemBalloon        `xml:"memballoon,omitempty"`
+	Disks         []Disk             `xml:"disk"`
+	Inputs        []Input            `xml:"input"`
+	Serials       []Serial           `xml:"serial"`
+	Consoles      []Console          `xml:"console"`
+	Watchdogs     []Watchdog         `xml:"watchdog,omitempty"`
+	Rng           *Rng               `xml:"rng,omitempty"`
+	Filesystems   []FilesystemDevice `xml:"filesystem,omitempty"`
+	Redirs        []RedirectedDevice `xml:"redirdev,omitempty"`
+	SoundCards    []SoundCard        `xml:"sound,omitempty"`
+	TPMs          []TPM              `xml:"tpm,omitempty"`
+	VSOCK         *VSOCK             `xml:"vsock,omitempty"`
+	MemoryDevices []MemoryDevice     `xml:"memory,omitempty"`
 }
 
 type PanicDevice struct {

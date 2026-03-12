@@ -3,6 +3,7 @@ package hostdevice
 import (
 	"bufio"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,6 +69,8 @@ const (
 	// sysfs/ACPI topology per GPU.
 	graceGINodesPerGPU = 8
 	graceGINodeSetBase = 1
+
+	egmHostdevAliasPrefix = "hostdev"
 )
 
 var (
@@ -79,6 +82,8 @@ var (
 	getDeviceIOMMUGroupInfoFunc    = hardware.GetDeviceIOMMUGroupInfo
 	getDevicePCITotalMMIOSizeFunc  = getDevicePCITotalMMIOSize
 	isIOMMUFDDeviceAvailableFunc   = isIOMMUFDDeviceAvailable
+	discoverEGMDevicesFunc         = hardware.DiscoverEGMDevices
+	statEGMDevicePathFunc          = os.Stat
 )
 
 // NormalizeHotplugRootPortAlias strips any user-alias prefixes (like "ua-") that libvirt may add.
@@ -263,28 +268,39 @@ func ComputePCISwitchGroupKey(path []string, bdf string) string {
 	return strings.Join(path[:len(path)-1], "/")
 }
 
-func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
+func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
 	if vmi == nil || domain == nil {
-		return
+		return nil
 	}
 	graceCfg := util.GetGraceVirtualizationConfig(vmi)
 	graceHostDevicesEnabled := isGraceHostDevicesEnabledForArch(vmi, graceCfg)
+	egmEnabled := graceCfg != nil && util.GraceFieldEnabled(graceCfg.EGM)
+	numaPassthroughEnabled := vmi.Spec.Domain.CPU != nil &&
+		vmi.Spec.Domain.CPU.NUMA != nil &&
+		vmi.Spec.Domain.CPU.NUMA.GuestMappingPassthrough != nil
 
 	log.Log.V(1).Info("evaluating host device NUMA topology passthrough")
-	// Host devcies NUMA passthrough only works when CPU NUMA passthrough is enabled
-	// because without CPU NUMA passthrough, there will be only one NUMA node in the guest
-	// so all host devices will be assigned to the same NUMA node.
-	if vmi.Spec.Domain.CPU == nil ||
-		vmi.Spec.Domain.CPU.NUMA == nil ||
-		vmi.Spec.Domain.CPU.NUMA.GuestMappingPassthrough == nil {
+	if !numaPassthroughEnabled && !egmEnabled {
 		log.Log.V(1).Info("NUMA host device topology not applied: guestMappingPassthrough disabled")
-		return
+		return nil
+	}
+
+	numaMappingAvailable := domain.Spec.CPU.NUMA != nil && len(domain.Spec.CPU.NUMA.Cells) > 0
+	if !numaMappingAvailable {
+		log.Log.V(1).Info("NUMA host device topology not applied: guest NUMA mapping unavailable")
+		if egmEnabled {
+			return fmt.Errorf("egm requested but guest NUMA topology was not prepared before host-device placement")
+		}
+		return nil
 	}
 
 	hostDevices := domain.Spec.Devices.HostDevices
 	if len(hostDevices) == 0 {
 		log.Log.V(1).Info("NUMA host device topology not applied: no host devices present")
-		return
+		if egmEnabled {
+			return fmt.Errorf("egm requires passthrough host devices to be present in the domain")
+		}
+		return nil
 	}
 
 	log.Log.V(1).Infof("NUMA host device topology: processing %d host devices", len(hostDevices))
@@ -376,7 +392,10 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 
 	if len(devicesWithNUMA) == 0 {
 		log.Log.V(1).Info("NUMA host device topology not applied: no devices with NUMA affinity detected")
-		return
+		if egmEnabled {
+			return fmt.Errorf("egm requested but no passthrough devices with NUMA affinity were detected")
+		}
+		return nil
 	}
 
 	if !allMappingsAccurate {
@@ -386,7 +405,10 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 		}
 		slices.Sort(nodes)
 		log.Log.Infof("NUMA host device topology not applied: guest NUMA topology lacks representation for host NUMA nodes %s", strings.Join(nodes, ","))
-		return
+		if egmEnabled {
+			return fmt.Errorf("egm requested but guest NUMA topology lacks representation for host NUMA nodes %s", strings.Join(nodes, ","))
+		}
+		return nil
 	}
 
 	if domain.Spec.CPU.NUMA != nil && len(domain.Spec.CPU.NUMA.Cells) == 1 && len(hostNUMANodes) > 1 {
@@ -396,7 +418,10 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 		}
 		slices.Sort(hostNodes)
 		log.Log.Infof("NUMA host device topology not applied: guest exposes a single NUMA cell but devices span host NUMA nodes %s", strings.Join(hostNodes, ","))
-		return
+		if egmEnabled {
+			return fmt.Errorf("egm requested but guest exposes a single NUMA cell while devices span host NUMA nodes %s", strings.Join(hostNodes, ","))
+		}
+		return nil
 	}
 
 	// In Grace mixed GPU+NIC topologies, isolate every passthrough device onto its own PXB hierarchy once large-MMIO and small-MMIO devices
@@ -543,6 +568,12 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 
 	applyGraceSMMUv3IOMMUTopology(domain, graceCfg, graceHostDevicesEnabled, iommuFDDeviceAvailable)
 
+	if egmEnabled && graceHostDevicesEnabled {
+		if err := applyEGMMemoryDevices(domain, devicesWithNUMA); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newNUMAPCIPlanner(domain *api.Domain) *numaPCIPlanner {
@@ -1454,6 +1485,147 @@ func removeGraceSMMUv3QEMUArgs(domain *api.Domain) {
 		return
 	}
 	domain.Spec.QEMUCmd.QEMUArg = filtered
+}
+
+// applyEGMMemoryDevices discovers EGM character devices on the host and adds
+// <memory model='egm' access='shared'> elements to the domain XML for each
+// passthrough GPU that has an associated EGM region.
+//
+// On multi-socket systems (e.g. GB200) a single EGM char device (/dev/egmN)
+// may serve multiple GPUs on the same socket. Each GPU still gets its own
+// <memory model='egm'> element (QEMU needs per-GPU acpi-egm-memory objects),
+// but the Grace EGM contract requires a VM to own the complete discovered EGM
+// allocation boundary: every GPU associated with every host EGM char device.
+// Per-GPU EGM size is therefore derived from the full host EGM group, not from
+// the VM-local subset of selected GPUs. If a future allocator exposes a narrower
+// compute-tray grouping explicitly, this check can be refined to that boundary.
+//
+// The EGM backing size comes from /sys/class/egm/egm*/egm_size. Do not derive
+// this value from lsmem, MemTotal, or generic host RAM accounting: those report
+// Linux memory state, while egm_size is the size QEMU maps through /dev/egmN.
+//
+// The function also assigns stable user-defined aliases to the GPU hostdevs
+// so that the <memory> pciDev attribute can reference them.
+func applyEGMMemoryDevices(domain *api.Domain, devicesWithNUMA []deviceNUMAInfo) error {
+	const bytesPerMiB = 1024 * 1024
+
+	egmDevices, err := discoverEGMDevicesFunc()
+	if err != nil {
+		return fmt.Errorf("egm requested but failed to discover host EGM devices: %w", err)
+	}
+	if len(egmDevices) == 0 {
+		return fmt.Errorf("egm requested but no /sys/class/egm devices were found on the host")
+	}
+
+	gpuDevices := make([]deviceNUMAInfo, 0, len(devicesWithNUMA))
+	for _, info := range devicesWithNUMA {
+		if info.dev == nil || info.dev.Type != api.HostDevicePCI {
+			continue
+		}
+		if hardware.FindEGMDeviceForGPU(info.bdf, egmDevices) == nil {
+			continue
+		}
+		gpuDevices = append(gpuDevices, info)
+	}
+
+	if len(gpuDevices) == 0 {
+		return fmt.Errorf("egm requested but no GPU host devices with EGM association were found")
+	}
+
+	slices.SortFunc(gpuDevices, func(a, b deviceNUMAInfo) int {
+		if a.bdf < b.bdf {
+			return -1
+		}
+		if a.bdf > b.bdf {
+			return 1
+		}
+		return 0
+	})
+
+	selectedGPUsPerEGMPath := make(map[string]uint64)
+	hostGPUsPerEGMPath := make(map[string]uint64)
+	perGPUSizeMiBByPath := make(map[string]uint64)
+	for _, gpuInfo := range gpuDevices {
+		egm := hardware.FindEGMDeviceForGPU(gpuInfo.bdf, egmDevices)
+		if egm == nil {
+			return fmt.Errorf("egm requested for GPU %s but no matching host EGM device was found", gpuInfo.bdf)
+		}
+		selectedGPUsPerEGMPath[egm.DevPath]++
+	}
+
+	for _, egm := range egmDevices {
+		selectedGPUs := selectedGPUsPerEGMPath[egm.DevPath]
+		hostGPUs := uint64(len(egm.GPUBDFs))
+		if hostGPUs == 0 {
+			return fmt.Errorf("egm device %s has no associated GPUs in host sysfs", egm.DevPath)
+		}
+		if selectedGPUs != hostGPUs {
+			return fmt.Errorf("egm requires all GPUs associated with discovered host EGM devices to be assigned to the VM; selected %d/%d GPUs sharing %s",
+				selectedGPUs, hostGPUs, egm.DevPath)
+		}
+		if egm.EGMSizeBytes%hostGPUs != 0 {
+			return fmt.Errorf("egm device %s reports %d bytes across %d GPUs; size must divide evenly per GPU",
+				egm.DevPath, egm.EGMSizeBytes, hostGPUs)
+		}
+
+		perGPUSizeBytes := egm.EGMSizeBytes / hostGPUs
+		if perGPUSizeBytes%bytesPerMiB != 0 {
+			return fmt.Errorf("egm device %s reports %d bytes across %d GPUs; per-GPU size must align to MiB",
+				egm.DevPath, egm.EGMSizeBytes, hostGPUs)
+		}
+
+		perGPUSizeMiB := perGPUSizeBytes / bytesPerMiB
+		if perGPUSizeMiB == 0 {
+			return fmt.Errorf("egm device %s has zero per-GPU EGM size (total %d bytes, %d GPUs)",
+				egm.DevPath, egm.EGMSizeBytes, hostGPUs)
+		}
+
+		hostGPUsPerEGMPath[egm.DevPath] = hostGPUs
+		perGPUSizeMiBByPath[egm.DevPath] = perGPUSizeMiB
+	}
+
+	hostdevIndex := 0
+	for i := range gpuDevices {
+		gpuInfo := &gpuDevices[i]
+		hostdevAlias := fmt.Sprintf("%s%d", egmHostdevAliasPrefix, hostdevIndex)
+
+		gpuInfo.dev.Alias = api.NewUserDefinedAlias(hostdevAlias)
+
+		egm := hardware.FindEGMDeviceForGPU(gpuInfo.bdf, egmDevices)
+		if egm == nil {
+			return fmt.Errorf("egm requested for GPU %s but no matching host EGM device was found", gpuInfo.bdf)
+		}
+		if _, err := statEGMDevicePathFunc(egm.DevPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("egm device %s is not present in the virt-launcher pod; expose /dev/egmN to the pod before starting the VM", egm.DevPath)
+			}
+			return fmt.Errorf("egm device %s is not accessible in the virt-launcher pod: %w", egm.DevPath, err)
+		}
+
+		numGPUs := hostGPUsPerEGMPath[egm.DevPath]
+		perGPUSizeMiB := perGPUSizeMiBByPath[egm.DevPath]
+		if perGPUSizeMiB == 0 {
+			return fmt.Errorf("egm device %s has no validated per-GPU size for GPU %s", egm.DevPath, gpuInfo.bdf)
+		}
+
+		domain.Spec.Devices.MemoryDevices = append(domain.Spec.Devices.MemoryDevices, api.MemoryDevice{
+			Model:  "egm",
+			Access: "shared",
+			Source: &api.MemoryDeviceSource{Path: egm.DevPath},
+			Target: &api.MemoryTarget{
+				Size:   api.Memory{Value: perGPUSizeMiB, Unit: "MiB"},
+				Node:   strconv.Itoa(gpuInfo.guestNUMANode),
+				PCIDev: api.UserAliasPrefix + hostdevAlias,
+			},
+		})
+
+		log.Log.Infof("EGM: added memory device %s (%d MiB, 1/%d host GPUs) for GPU %s (alias %s, guest NUMA %d)",
+			egm.DevPath, perGPUSizeMiB, numGPUs, gpuInfo.bdf, hostdevAlias, gpuInfo.guestNUMANode)
+
+		hostdevIndex++
+	}
+
+	return nil
 }
 
 func collectNUMAPXBPciBuses(domain *api.Domain) []string {

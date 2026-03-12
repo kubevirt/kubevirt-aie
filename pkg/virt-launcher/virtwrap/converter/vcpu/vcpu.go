@@ -14,6 +14,7 @@ import (
 	v12 "kubevirt.io/api/core/v1"
 
 	v1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
+	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/util/hardware"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
@@ -359,6 +360,15 @@ func isNumaPassthrough(vmi *v12.VirtualMachineInstance) bool {
 	return vmi.Spec.Domain.CPU.NUMA != nil && vmi.Spec.Domain.CPU.NUMA.GuestMappingPassthrough != nil
 }
 
+func isGraceEGMEnabled(vmi *v12.VirtualMachineInstance) bool {
+	cfg := util.GetGraceVirtualizationConfig(vmi)
+	return cfg != nil && util.GraceFieldEnabled(cfg.EGM)
+}
+
+func requiresStrictNUMAAffinity(vmi *v12.VirtualMachineInstance) bool {
+	return isNumaPassthrough(vmi) || isGraceEGMEnabled(vmi)
+}
+
 func appendDomainEmulatorThreadPin(domain *api.Domain, cpuSet string) {
 	emulatorThreads := api.CPUEmulatorPin{
 		CPUSet: cpuSet,
@@ -465,7 +475,7 @@ func AdjustDomainForTopologyAndCPUSet(domain *api.Domain, vmi *v12.VirtualMachin
 		requestedToplogy.Sockets -= uint32(disabledSockets)
 	}
 
-	if isNumaPassthrough(vmi) {
+	if requiresStrictNUMAAffinity(vmi) {
 		cpuPool = NewStrictCPUPool(requestedToplogy, topology, cpuset)
 	} else {
 		cpuPool = NewRelaxedCPUPool(requestedToplogy, topology, cpuset)
@@ -519,7 +529,12 @@ func AdjustDomainForTopologyAndCPUSet(domain *api.Domain, vmi *v12.VirtualMachin
 		domain.Spec.Features.PMU = &api.FeatureState{State: "off"}
 	}
 
-	if isNumaPassthrough(vmi) {
+	if isGraceEGMEnabled(vmi) {
+		if err := numaMappingForGraceEGM(vmi, &domain.Spec, topology); err != nil {
+			log.Log.Reason(err).Error("failed to calculate Grace EGM NUMA topology.")
+			return err
+		}
+	} else if isNumaPassthrough(vmi) {
 		if err := numaMapping(vmi, &domain.Spec, topology); err != nil {
 			log.Log.Reason(err).Error("failed to calculate passed through NUMA topology.")
 			return err
@@ -672,6 +687,54 @@ func numaMapping(vmi *v12.VirtualMachineInstance, domain *api.DomainSpec, topolo
 		// RT settings when hugepages are enabled
 		domain.MemoryBacking.NoSharePages = &api.NoSharePages{}
 	}
+	return nil
+}
+
+func numaMappingForGraceEGM(vmi *v12.VirtualMachineInstance, domain *api.DomainSpec, topology *v1.Topology) error {
+	if topology == nil || len(topology.NumaCells) == 0 {
+		return nil
+	}
+	cpumap := cpuToCell(topology)
+	numamap, err := involvedCells(cpumap, domain.CPUTune)
+	if err != nil {
+		return fmt.Errorf("failed to generate numa pinning information: %v", err)
+	}
+
+	var involvedCellIDs []string
+	for _, cell := range topology.NumaCells {
+		if _, exists := numamap[cell.Id]; exists {
+			involvedCellIDs = append(involvedCellIDs, strconv.Itoa(int(cell.Id)))
+		}
+	}
+
+	domain.CPU.NUMA = &api.NUMA{}
+	// EGM-backed memory is not a generic NUMA-bound file or hugepage backend.
+	// Avoid libvirt NUMATune for this path so it does not translate the EGM
+	// chardev into host-nodes/policy=bind memory-backend-file arguments.
+	domain.NUMATune = nil
+
+	memory, err := QuantityToByte(*GetVirtualMemory(vmi))
+	if err != nil {
+		return fmt.Errorf("could not convert VMI memory to quantity: %v", err)
+	}
+
+	virtualCellID := -1
+	for _, cell := range topology.NumaCells {
+		if vcpus, exists := numamap[cell.Id]; exists {
+			var cpus []string
+			for _, cpu := range vcpus {
+				cpus = append(cpus, strconv.Itoa(int(cpu)))
+			}
+			virtualCellID++
+			domain.CPU.NUMA.Cells = append(domain.CPU.NUMA.Cells, api.NUMACell{
+				ID:     strconv.Itoa(virtualCellID),
+				CPUs:   strings.Join(cpus, ","),
+				Memory: memory.Value / uint64(len(numamap)),
+				Unit:   memory.Unit,
+			})
+		}
+	}
+
 	return nil
 }
 

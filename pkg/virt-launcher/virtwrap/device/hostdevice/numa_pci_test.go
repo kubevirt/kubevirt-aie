@@ -1,7 +1,9 @@
 package hostdevice
 
 import (
+	"encoding/xml"
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -13,6 +15,13 @@ import (
 	"kubevirt.io/kubevirt/pkg/util/hardware"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
+
+func mustApplyNUMAHostDeviceTopology(t *testing.T, vmi *v1.VirtualMachineInstance, domain *api.Domain) {
+	t.Helper()
+	if err := ApplyNUMAHostDeviceTopology(vmi, domain); err != nil {
+		t.Fatalf("ApplyNUMAHostDeviceTopology returned error: %v", err)
+	}
+}
 
 func TestNormalizeHotplugRootPortAlias(t *testing.T) {
 	t.Parallel()
@@ -124,7 +133,7 @@ func TestApplyNUMAHostDeviceTopologyDisabled(t *testing.T) {
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 	stubPCIPath("0000:02:00.0", []string{"0000:00:02.0", "0000:02:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	if len(domain.Spec.Devices.Controllers) != 1 {
 		t.Fatalf("expected controllers unchanged, got %d", len(domain.Spec.Devices.Controllers))
@@ -203,7 +212,7 @@ func TestApplyNUMAHostDeviceTopologyCreatesPXBs(t *testing.T) {
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 	stubPCIPath("0000:02:00.0", []string{"0000:00:02.0", "0000:02:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	var pxbCount int
 	var numaNodes []int
@@ -284,7 +293,7 @@ func TestApplyNUMAHostDeviceTopologyUsesDedicatedPXBForLargeMMIODevices(t *testi
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 	stubPCIPath("0000:02:00.0", []string{"0000:00:02.0", "0000:02:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	var pxbBuses []int
 	for _, ctrl := range domain.Spec.Devices.Controllers {
@@ -464,7 +473,7 @@ func TestApplyNUMAHostDeviceTopologySingleGuestCellPreservesHostNUMA(t *testing.
 	stubPCIPath("0000:83:00.0", []string{"0000:80:83.0", "0000:83:00.0"})
 	stubPCIPath("0000:84:00.0", []string{"0000:80:84.0", "0000:84:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	for _, ctrl := range domain.Spec.Devices.Controllers {
 		if ctrl.Model == "pcie-expander-bus" {
@@ -532,7 +541,7 @@ func TestApplyNUMAHostDeviceTopologyGroupsByTopologyWithinNUMA(t *testing.T) {
 	stubPCIPath("0000:04:00.0", []string{"0000:00:02.0", "0000:02:00.0", "0000:04:00.0"})
 	stubPCIPath("0000:05:00.0", []string{"0000:00:01.0", "0000:01:00.0", "0000:05:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	var pxbControllers []api.Controller
 	for _, ctrl := range domain.Spec.Devices.Controllers {
@@ -618,7 +627,7 @@ func TestApplyNUMAHostDeviceTopologyHandlesMdev(t *testing.T) {
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	var pxbCount int
 	for _, ctrl := range domain.Spec.Devices.Controllers {
@@ -695,7 +704,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettings(t *testi
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 	stubPCIPath("0000:83:00.0", []string{"0000:80:01.0", "0000:83:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	expectedNodeSets := []string{"0", "1"}
 	for i := range domain.Spec.Devices.HostDevices {
@@ -767,7 +776,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceHostDeviceSettingsFromGrace
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 	stubPCIPath("0000:83:00.0", []string{"0000:80:01.0", "0000:83:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	expectedNodeSets := []string{"0", "1"}
 	for i := range domain.Spec.Devices.HostDevices {
@@ -828,7 +837,7 @@ func TestApplyNUMAHostDeviceTopologyAcceptsGraceVirtualizationAnnotationWithSMMU
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	dev := domain.Spec.Devices.HostDevices[0]
 	if dev.Driver != nil && dev.Driver.IOMMUFD != "" {
@@ -895,7 +904,7 @@ func TestApplyNUMAHostDeviceTopologySkipsGraceHostDeviceSettingsWithoutGraceVirt
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	dev := domain.Spec.Devices.HostDevices[0]
 	if dev.Driver != nil {
@@ -971,7 +980,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsAndVCMDQ(t *testing.T) {
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	if len(domain.Spec.Devices.IOMMUs) == 0 {
 		t.Fatalf("expected libvirt iommu entries for smmuv3")
@@ -1063,7 +1072,7 @@ func TestApplyNUMAHostDeviceTopologyScopesVCMDQToDedicatedPXBBuses(t *testing.T)
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 	stubPCIPath("0000:08:00.0", []string{"0000:00:02.0", "0000:08:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	var pxbControllers int
 	for _, ctrl := range domain.Spec.Devices.Controllers {
@@ -1166,7 +1175,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsWithoutVCMDQByDefault(t *
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	if len(domain.Spec.Devices.IOMMUs) == 0 {
 		t.Fatalf("expected libvirt iommu entries for smmuv3")
@@ -1231,7 +1240,7 @@ func TestApplyNUMAHostDeviceTopologyFallsBackToSMMUv3AccelOffWithoutIOMMUDevice(
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	if len(domain.Spec.Devices.IOMMUs) == 0 {
 		t.Fatalf("expected smmuv3 iommu entries to be generated")
@@ -1351,7 +1360,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceGINodeSetsForLargeMMIOGPUs(
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 	stubPCIPath("0000:83:00.0", []string{"0000:80:01.0", "0000:83:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	expectedNodeSets := []string{"2-9", "10-17"}
 	for i := range domain.Spec.Devices.HostDevices {
@@ -1453,7 +1462,7 @@ func TestApplyNUMAHostDeviceTopologyInjectsIOMMUFDOnlyForLargeMMIOGraceDevices(t
 	stubPCIPath("0000:18:00.0", []string{"0000:00:18.0", "0000:18:00.0"})
 	stubPCIPath("0000:83:00.0", []string{"0000:80:03.0", "0000:83:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	type expectedHostDevice struct {
 		nodeSet string
@@ -1556,7 +1565,7 @@ func TestApplyNUMAHostDeviceTopologyAssignsUniqueGINodeSetsPerLargeMMIOGPU(t *te
 	stubPCIPath("0000:18:00.0", []string{"0000:00:18.0", "0000:18:00.0"})
 	stubPCIPath("0000:19:00.0", []string{"0000:00:19.0", "0000:19:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	expectedByBDF := map[string]string{
 		"0000:08:00.0": "2-9",
@@ -1651,7 +1660,7 @@ func TestApplyNUMAHostDeviceTopologySkipsArm64GraceHostDeviceSettingsOnNonArm64(
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	dev := domain.Spec.Devices.HostDevices[0]
 	if dev.Driver != nil {
@@ -1702,6 +1711,8 @@ func restoreNUMAHelpers() {
 	getDeviceIOMMUGroupInfoFunc = hardware.GetDeviceIOMMUGroupInfo
 	getDevicePCITotalMMIOSizeFunc = getDevicePCITotalMMIOSize
 	isIOMMUFDDeviceAvailableFunc = isIOMMUFDDeviceAvailable
+	discoverEGMDevicesFunc = hardware.DiscoverEGMDevices
+	statEGMDevicePathFunc = os.Stat
 	testPCIHierarchy = map[string][]string{}
 	setDefaultTopologyGrouping()
 }
@@ -1855,7 +1866,7 @@ func TestApplyNUMAHostDeviceTopologyDeviceResolutionFailure(t *testing.T) {
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create any new controllers when device resolution fails
 	if len(domain.Spec.Devices.Controllers) != 1 {
@@ -1915,7 +1926,7 @@ func TestApplyNUMAHostDeviceTopologyNumaDetectionFailure(t *testing.T) {
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create any new controllers when NUMA detection fails
 	if len(domain.Spec.Devices.Controllers) != 1 {
@@ -1969,7 +1980,7 @@ func TestApplyNUMAHostDeviceTopologyMdevParentResolutionFailure(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create any new controllers when mdev parent resolution fails
 	if len(domain.Spec.Devices.Controllers) != 1 {
@@ -2013,7 +2024,7 @@ func TestApplyNUMAHostDeviceTopologyNoHostDevices(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create any new controllers when no host devices
 	if len(domain.Spec.Devices.Controllers) != 1 {
@@ -2067,7 +2078,7 @@ func TestApplyNUMAHostDeviceTopologyNoNumaAffinity(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create any new controllers when devices have no NUMA affinity
 	if len(domain.Spec.Devices.Controllers) != 1 {
@@ -2120,7 +2131,7 @@ func TestApplyNUMAHostDeviceTopologyUnsupportedDeviceTypes(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create any new controllers for unsupported device types
 	if len(domain.Spec.Devices.Controllers) != 1 {
@@ -2195,7 +2206,7 @@ func TestApplyNUMAHostDeviceTopologySlotExhaustion(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should not create new controllers when slots are exhausted
 	// Original controllers + all occupied slots = expected count
@@ -2266,7 +2277,7 @@ func TestApplyNUMAHostDeviceTopologyReservesImplicitRootBusSlots(t *testing.T) {
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	var reservedSlot string
 	for _, ctrl := range domain.Spec.Devices.Controllers {
@@ -2357,7 +2368,7 @@ func TestApplyNUMAHostDeviceTopologyHandlesExistingHotplugSlots(t *testing.T) {
 	assignNUMAMapping(domain, map[int]int{0: 0})
 	stubPCIPath("0000:01:00.0", []string{"0000:00:01.0", "0000:01:00.0"})
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	foundPXB := false
 	for _, ctrl := range domain.Spec.Devices.Controllers {
@@ -2444,7 +2455,7 @@ func TestApplyNUMAHostDeviceTopologyExistingControllerSlots(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Existing PXB should remain; planner may reuse it or allocate the next available slot depending on collapse behaviour
 	hasSlot0A := false
@@ -2560,7 +2571,7 @@ func TestApplyNUMAHostDeviceTopologyMultipleDevicesPerNode(t *testing.T) {
 		stubPCIPath(bdf, []string{fmt.Sprintf("0000:00:%s.0", bus), bdf})
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Should create 2 PXB controllers (one per NUMA node)
 	var pxbCount int
@@ -2982,7 +2993,7 @@ func TestApplyNUMAHostDeviceTopologyRealWorldScenario(t *testing.T) {
 		stubPCIPath(bdf, []string{fmt.Sprintf("0000:80:%s.0", bus), bdf})
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Verify PXB controllers are created for both NUMA nodes
 	var pxbCount int
@@ -3105,7 +3116,7 @@ func TestNUMAPCIPlannerConflictDetection(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Verify no slot conflicts
 	var usedSlots = make(map[string]bool)
@@ -3380,7 +3391,7 @@ func TestHGXH200TopologyWithPCIeSwitches(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Verify PXB controllers for both NUMA nodes
 	pxbCount := 0
@@ -3524,7 +3535,7 @@ func TestSimpleServerDirectTopology(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Verify PXB controllers for both NUMA nodes
 	pxbCount := 0
@@ -3695,7 +3706,7 @@ func TestMixedTopology(t *testing.T) {
 		},
 	}
 
-	ApplyNUMAHostDeviceTopology(vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
 
 	// Verify PXB controllers for both NUMA nodes
 	pxbCount := 0
@@ -3865,4 +3876,753 @@ func TestComputePCISwitchGroupKey(t *testing.T) {
 			t.Errorf("Devices on different NUMA nodes should have different keys, both got %s", key0)
 		}
 	})
+}
+
+func TestApplyEGMMemoryDevices(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	statEGMDevicePathFunc = func(string) (os.FileInfo, error) { return os.Stat(os.DevNull) }
+
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return []hardware.EGMDeviceInfo{
+			{
+				DevPath:      "/dev/egm4",
+				GPUBDFs:      []string{"0000:03:00.0"},
+				EGMSizeBytes: 56896 * 1024 * 1024,
+				NUMANode:     0,
+			},
+		}, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			MemoryBacking: &api.MemoryBacking{
+				HugePages:  &api.HugePages{},
+				Source:     &api.MemoryBackingSource{Type: "memfd"},
+				Allocation: &api.MemoryAllocation{Mode: api.MemoryAllocationModeImmediate},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	egmDevices := make([]api.MemoryDevice, 0)
+	for _, md := range domain.Spec.Devices.MemoryDevices {
+		if md.Model == "egm" {
+			egmDevices = append(egmDevices, md)
+		}
+	}
+	if len(egmDevices) != 1 {
+		t.Fatalf("expected 1 EGM memory device, got %d", len(egmDevices))
+	}
+	egm := egmDevices[0]
+	if egm.Access != "shared" {
+		t.Errorf("expected EGM access='shared', got %q", egm.Access)
+	}
+	if egm.Source == nil || egm.Source.Path != "/dev/egm4" {
+		t.Errorf("expected EGM source path '/dev/egm4', got %v", egm.Source)
+	}
+	if egm.Target == nil {
+		t.Fatal("expected EGM target, got nil")
+	}
+	if egm.Target.Node != "0" {
+		t.Errorf("expected EGM target node '0', got %q", egm.Target.Node)
+	}
+	expectedSizeMiB := uint64(56896)
+	if egm.Target.Size.Value != expectedSizeMiB || egm.Target.Size.Unit != "MiB" {
+		t.Errorf("expected EGM target size %d MiB, got %d %s", expectedSizeMiB, egm.Target.Size.Value, egm.Target.Size.Unit)
+	}
+	if !strings.HasPrefix(egm.Target.PCIDev, api.UserAliasPrefix) {
+		t.Errorf("expected EGM pciDev to start with %q, got %q", api.UserAliasPrefix, egm.Target.PCIDev)
+	}
+	xmlBytes, err := xml.Marshal(egm)
+	if err != nil {
+		t.Fatalf("failed to marshal EGM memory device: %v", err)
+	}
+	xmlString := string(xmlBytes)
+	if strings.Contains(xmlString, "<requested") {
+		t.Fatalf("did not expect requested field in EGM XML: %s", xmlString)
+	}
+	if strings.Contains(xmlString, "<current") {
+		t.Fatalf("did not expect current field in EGM XML: %s", xmlString)
+	}
+	if strings.Contains(xmlString, "<block") {
+		t.Fatalf("did not expect block field in EGM XML: %s", xmlString)
+	}
+
+	if domain.Spec.MemoryBacking == nil {
+		t.Fatal("expected existing MemoryBacking to be preserved")
+	}
+	if domain.Spec.MemoryBacking.HugePages == nil {
+		t.Fatal("expected hugepages configuration to be preserved")
+	}
+	if domain.Spec.MemoryBacking.Source == nil || domain.Spec.MemoryBacking.Source.Type != "memfd" {
+		t.Errorf("expected MemoryBacking source type 'memfd' to be preserved, got %v", domain.Spec.MemoryBacking.Source)
+	}
+	if domain.Spec.MemoryBacking.Allocation == nil || domain.Spec.MemoryBacking.Allocation.Mode != api.MemoryAllocationModeImmediate {
+		t.Errorf("expected MemoryBacking allocation mode 'immediate' to be preserved, got %v", domain.Spec.MemoryBacking.Allocation)
+	}
+
+	// Verify GPU hostdev has the alias set
+	found := false
+	for i := range domain.Spec.Devices.HostDevices {
+		dev := &domain.Spec.Devices.HostDevices[i]
+		if dev.Alias != nil && dev.Alias.IsUserDefined() && strings.HasPrefix(dev.Alias.GetName(), egmHostdevAliasPrefix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected GPU hostdev to have a user-defined alias with hostdev prefix")
+	}
+}
+
+func TestApplyEGMMemoryDevicesNoEGMDevicesOnHost(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return nil, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	err := ApplyNUMAHostDeviceTopology(vmi, domain)
+	if err == nil {
+		t.Fatal("expected EGM host discovery failure to return an error")
+	}
+	if !strings.Contains(err.Error(), "no /sys/class/egm devices were found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, md := range domain.Spec.Devices.MemoryDevices {
+		if md.Model == "egm" {
+			t.Fatal("expected no EGM memory devices when host has no EGM devices")
+		}
+	}
+}
+
+func TestApplyEGMMemoryDevicesFailsWhenEGMDeviceMissingInPod(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	statEGMDevicePathFunc = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return []hardware.EGMDeviceInfo{
+			{
+				DevPath:      "/dev/egm4",
+				GPUBDFs:      []string{"0000:03:00.0"},
+				EGMSizeBytes: 56896 * 1024 * 1024,
+				NUMANode:     0,
+			},
+		}, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	err := ApplyNUMAHostDeviceTopology(vmi, domain)
+	if err == nil {
+		t.Fatal("expected missing /dev/egmN device to return an error")
+	}
+	if !strings.Contains(err.Error(), "not present in the virt-launcher pod") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestApplyEGMMemoryDevicesDisabledWhenEGMFlagFalse(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		t.Fatal("discoverEGMDevices should not be called when EGM is disabled")
+		return nil, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	for _, md := range domain.Spec.Devices.MemoryDevices {
+		if md.Model == "egm" {
+			t.Fatal("expected no EGM memory devices when EGM flag is not set")
+		}
+	}
+}
+
+func TestApplyEGMMemoryDevicesRejectsPartialSharedEGMGroup(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	statEGMDevicePathFunc = func(string) (os.FileInfo, error) { return os.Stat(os.DevNull) }
+	stubPCIPath("0008:01:00.0", []string{"0008:00:00.0", "0008:01:00.0"})
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return []hardware.EGMDeviceInfo{
+			{
+				DevPath:      "/dev/egm4",
+				GPUBDFs:      []string{"0008:01:00.0", "0009:01:00.0"},
+				EGMSizeBytes: 56896 * 1024 * 1024,
+				NUMANode:     0,
+			},
+		}, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0008", "0x01"),
+				},
+			},
+		},
+	}
+
+	err := ApplyNUMAHostDeviceTopology(vmi, domain)
+	if err == nil {
+		t.Fatal("expected partial shared EGM group selection to be rejected")
+	}
+	if !strings.Contains(err.Error(), "egm requires all GPUs associated with discovered host EGM devices") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestApplyEGMMemoryDevicesRejectsPartialDiscoveredEGMBoundary(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	statEGMDevicePathFunc = func(string) (os.FileInfo, error) { return os.Stat(os.DevNull) }
+
+	stubPCIPath("0008:01:00.0", []string{"0008:00:00.0", "0008:01:00.0"})
+	stubPCIPath("0009:01:00.0", []string{"0009:00:00.0", "0009:01:00.0"})
+
+	totalEGMSizeBytes := uint64(56896) * 1024 * 1024
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return []hardware.EGMDeviceInfo{
+			{
+				DevPath:      "/dev/egm4",
+				GPUBDFs:      []string{"0008:01:00.0", "0009:01:00.0"},
+				EGMSizeBytes: totalEGMSizeBytes,
+				NUMANode:     0,
+			},
+			{
+				DevPath:      "/dev/egm5",
+				GPUBDFs:      []string{"0018:01:00.0", "0019:01:00.0"},
+				EGMSizeBytes: totalEGMSizeBytes,
+				NUMANode:     1,
+			},
+		}, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0008", "0x01"),
+					newTestPCIHostDevice("gpu1", "0x0009", "0x01"),
+				},
+			},
+		},
+	}
+
+	err := ApplyNUMAHostDeviceTopology(vmi, domain)
+	if err == nil {
+		t.Fatal("expected partial discovered EGM boundary selection to be rejected")
+	}
+	if !strings.Contains(err.Error(), "egm requires all GPUs associated with discovered host EGM devices") ||
+		!strings.Contains(err.Error(), "selected 0/2 GPUs sharing /dev/egm5") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestApplyEGMMemoryDevicesMultiSocket verifies that on a 2-socket GB200 system
+// with 4 GPUs and 2 EGM devices (/dev/egm4 → 2 GPUs on socket 0,
+// /dev/egm5 → 2 GPUs on socket 1), each GPU gets its own <memory model='egm'>
+// element with size = totalEGM / numGPUsPerDevice, and the NUMA node is the
+// correct per-socket guest node.
+func TestApplyEGMMemoryDevicesMultiSocket(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+
+	numaNodeByDomain := map[string]int{
+		"0008": 0, "0009": 0,
+		"0018": 1, "0019": 1,
+	}
+	getDeviceNumaNodeIntFunc = func(bdf string) (int, error) {
+		parts := strings.SplitN(bdf, ":", 2)
+		if n, ok := numaNodeByDomain[parts[0]]; ok {
+			return n, nil
+		}
+		return 0, nil
+	}
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+	statEGMDevicePathFunc = func(string) (os.FileInfo, error) { return os.Stat(os.DevNull) }
+
+	proximityByDomain := map[string]string{
+		"0008": "numa-0", "0009": "numa-0",
+		"0018": "numa-1", "0019": "numa-1",
+	}
+	getDevicePCIProximityGroupFunc = func(bdf string) (string, error) {
+		parts := strings.SplitN(bdf, ":", 2)
+		if g, ok := proximityByDomain[parts[0]]; ok {
+			return g, nil
+		}
+		return "numa-0", nil
+	}
+
+	stubPCIPath("0008:01:00.0", []string{"0008:00:00.0", "0008:01:00.0"})
+	stubPCIPath("0009:01:00.0", []string{"0009:00:00.0", "0009:01:00.0"})
+	stubPCIPath("0018:01:00.0", []string{"0018:00:00.0", "0018:01:00.0"})
+	stubPCIPath("0019:01:00.0", []string{"0019:00:00.0", "0019:01:00.0"})
+
+	totalEGMSizeBytes := uint64(56896) * 1024 * 1024
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return []hardware.EGMDeviceInfo{
+			{
+				DevPath:      "/dev/egm4",
+				GPUBDFs:      []string{"0008:01:00.0", "0009:01:00.0"},
+				EGMSizeBytes: totalEGMSizeBytes,
+				NUMANode:     0,
+			},
+			{
+				DevPath:      "/dev/egm5",
+				GPUBDFs:      []string{"0018:01:00.0", "0019:01:00.0"},
+				EGMSizeBytes: totalEGMSizeBytes,
+				NUMANode:     1,
+			},
+		}, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-71", Memory: 268369920, Unit: "KiB"},
+						{ID: "1", CPUs: "72-143", Memory: 268928000, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0008", "0x01"),
+					newTestPCIHostDevice("gpu1", "0x0009", "0x01"),
+					newTestPCIHostDevice("gpu2", "0x0018", "0x01"),
+					newTestPCIHostDevice("gpu3", "0x0019", "0x01"),
+				},
+			},
+		},
+	}
+
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	egmDevs := make([]api.MemoryDevice, 0)
+	for _, md := range domain.Spec.Devices.MemoryDevices {
+		if md.Model == "egm" {
+			egmDevs = append(egmDevs, md)
+		}
+	}
+	if len(egmDevs) != 4 {
+		t.Fatalf("expected 4 EGM memory devices (one per GPU), got %d", len(egmDevs))
+	}
+
+	expectedPerGPUSizeMiB := uint64(56896 / 2)
+
+	egm4Count, egm5Count := 0, 0
+	for _, e := range egmDevs {
+		if e.Access != "shared" {
+			t.Errorf("expected EGM access='shared', got %q", e.Access)
+		}
+		if e.Target == nil {
+			t.Fatal("expected EGM target, got nil")
+			continue
+		}
+		if e.Target.Size.Value != expectedPerGPUSizeMiB || e.Target.Size.Unit != "MiB" {
+			t.Errorf("expected per-GPU EGM size %d MiB, got %d %s",
+				expectedPerGPUSizeMiB, e.Target.Size.Value, e.Target.Size.Unit)
+		}
+
+		switch {
+		case e.Source != nil && e.Source.Path == "/dev/egm4":
+			egm4Count++
+			if e.Target.Node != "0" {
+				t.Errorf("expected /dev/egm4 GPU on guest NUMA 0, got %q", e.Target.Node)
+			}
+		case e.Source != nil && e.Source.Path == "/dev/egm5":
+			egm5Count++
+			if e.Target.Node != "1" {
+				t.Errorf("expected /dev/egm5 GPU on guest NUMA 1, got %q", e.Target.Node)
+			}
+		default:
+			t.Errorf("unexpected EGM source path: %v", e.Source)
+		}
+	}
+	if egm4Count != 2 {
+		t.Errorf("expected 2 EGM entries for /dev/egm4 (socket 0), got %d", egm4Count)
+	}
+	if egm5Count != 2 {
+		t.Errorf("expected 2 EGM entries for /dev/egm5 (socket 1), got %d", egm5Count)
+	}
+
+	aliasCount := 0
+	for i := range domain.Spec.Devices.HostDevices {
+		dev := &domain.Spec.Devices.HostDevices[i]
+		if dev.Alias != nil && dev.Alias.IsUserDefined() && strings.HasPrefix(dev.Alias.GetName(), egmHostdevAliasPrefix) {
+			aliasCount++
+		}
+	}
+	if aliasCount != 4 {
+		t.Errorf("expected 4 GPU hostdevs with EGM aliases, got %d", aliasCount)
+	}
+}
+
+func TestApplyEGMMemoryDevicesUsesExplicitEGMAssociationEvenWithoutDedicatedPXB(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) { return 0, nil }
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return 0, nil
+	}
+	getDevicePCIProximityGroupFunc = func(string) (string, error) { return "numa-0", nil }
+	statEGMDevicePathFunc = func(string) (os.FileInfo, error) { return os.Stat(os.DevNull) }
+
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	discoverEGMDevicesFunc = func() ([]hardware.EGMDeviceInfo, error) {
+		return []hardware.EGMDeviceInfo{
+			{
+				DevPath:      "/dev/egm4",
+				GPUBDFs:      []string{"0000:03:00.0"},
+				EGMSizeBytes: 56896 * 1024 * 1024,
+				NUMANode:     0,
+			},
+		}, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: arm64Architecture,
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3": true, "egm": true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{
+					Cells: []api.NUMACell{
+						{ID: "0", CPUs: "0-7", Memory: 8388608, Unit: "KiB"},
+					},
+				},
+			},
+			Devices: api.Devices{
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	egmCount := 0
+	for _, md := range domain.Spec.Devices.MemoryDevices {
+		if md.Model == "egm" {
+			egmCount++
+		}
+	}
+	if egmCount != 1 {
+		t.Fatalf("expected 1 EGM memory device when explicit host EGM association exists, got %d", egmCount)
+	}
 }
