@@ -10,6 +10,7 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
+	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
@@ -20,9 +21,9 @@ var _ = Describe("NumaPlacement", func() {
 	var givenTopology *cmdv1.Topology
 	var expectedSpec *api.DomainSpec
 	var MiBInBytes_2 = strconv.Itoa(2 * 1024 * 1024)
-	var MiBInBytes_22 uint64 = 22 * 1024 * 1024
-	var MiBInBytes_20 uint64 = 20 * 1024 * 1024
-	var MiBInBytes_32 uint64 = 32 * 1024 * 1024
+	var MiBInBytes_22 = pointer.P(uint64(22 * 1024 * 1024))
+	var MiBInBytes_20 = pointer.P(uint64(20 * 1024 * 1024))
+	var MiBInBytes_32 = pointer.P(uint64(32 * 1024 * 1024))
 
 	BeforeEach(func() {
 		var err error

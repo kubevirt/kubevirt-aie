@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	iommupci "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/iommu-pci"
 )
@@ -94,7 +95,7 @@ func handleFakeNumaNodes(domain *api.DomainSpec) {
 			for count := range 8 {
 				domain.CPU.NUMA.Cells = append(domain.CPU.NUMA.Cells, api.NUMACell{
 					ID:     fmt.Sprintf("%d", initialNumaCellId+count),
-					Memory: 0,
+					Memory: pointer.P(uint64(0)),
 					Unit:   "KiB",
 				})
 				finalNumaCellId = initialNumaCellId + count

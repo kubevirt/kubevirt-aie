@@ -7,6 +7,8 @@ import (
 	api "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 
 	"libvirt.org/go/libvirtxml"
+
+	"kubevirt.io/kubevirt/pkg/pointer"
 )
 
 var _ = Describe("Convert KubeVirt domain types to Libvirtxml", func() {
@@ -194,7 +196,7 @@ var _ = Describe("Convert KubeVirt domain types to Libvirtxml", func() {
 	})
 
 	Context("CPU with NUMA", func() {
-		cell := api.NUMACell{ID: "123", CPUs: "1", Memory: uint64(123), Unit: "G", MemoryAccess: "test"}
+		cell := api.NUMACell{ID: "123", CPUs: "1", Memory: pointer.P(uint64(123)), Unit: "G", MemoryAccess: "test"}
 		dcell := libvirtxml.DomainCell{ID: &id, CPUs: "1", Memory: uint(123), Unit: "G", MemAccess: "test"}
 
 		DescribeTable("ConvertKubeVirtNUMACellToDomainDomainCell", func(v []api.NUMACell, expected []libvirtxml.DomainCell, expectErr string) {
