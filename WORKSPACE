@@ -9200,18 +9200,18 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-client-0__11.10.0-10.2.el10nv.aarch64",
-    sha256 = "2b4df3169951420812660acd6f2b27e99204e626ed6bec070c45e8acc7b51b58",
+    name = "libvirt-client-0__11.10.0-10.3.el10nv.aarch64",
+    sha256 = "6c31233de5d5106854fae30542ed3808022140b9c1ba859409c0108048e3f69b",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/aarch64/libvirt-client-11.10.0-10.2.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/aarch64/libvirt-client-11.10.0-10.3.el10nv.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "libvirt-client-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "56d002216203a7ff4e7bc6b3f7acaea0427d4f6b692c79465d0ecca770e2fcf8",
+    name = "libvirt-client-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "0e3c822421c0130c1acff6b8dd77a9e9e006251e16ff099699a0f149c529f5fe",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-client-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-client-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9273,18 +9273,18 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-daemon-common-0__11.10.0-10.2.el10nv.aarch64",
-    sha256 = "4f3dff2dffbe78d1fb6b86bc4f4f7f2b8a5ff730b6117dce7aa2f57eb32cf95d",
+    name = "libvirt-daemon-common-0__11.10.0-10.3.el10nv.aarch64",
+    sha256 = "6cd9c6f9f4cb4f286b5170426fd9380a9935511e013fffadac4ab07aa706b165",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/aarch64/libvirt-daemon-common-11.10.0-10.2.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/aarch64/libvirt-daemon-common-11.10.0-10.3.el10nv.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "libvirt-daemon-common-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "3594436dd4c7219aee41062fd6a6a6a2369f7294a4c1fb11fc14b2534d17d1df",
+    name = "libvirt-daemon-common-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "532637d5bb0db5914d10646724eeb5db0f39f210269fca0ac4ced04e636d5651",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-daemon-common-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-daemon-common-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9346,18 +9346,18 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-daemon-driver-qemu-0__11.10.0-10.2.el10nv.aarch64",
-    sha256 = "a7c5148d28dfdd96525ac7e5833bbb3186ed5731cc9a7356f83fd95f0172d2ab",
+    name = "libvirt-daemon-driver-qemu-0__11.10.0-10.3.el10nv.aarch64",
+    sha256 = "07a718bbb9c2ccf55695407ffee52e3420ce6e94940366268aaea1858c4fedee",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/aarch64/libvirt-daemon-driver-qemu-11.10.0-10.2.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/aarch64/libvirt-daemon-driver-qemu-11.10.0-10.3.el10nv.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "libvirt-daemon-driver-qemu-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "f14d00f8caede110fa1691c03424fa28b012ef6004e751e23ce118e877b9ab75",
+    name = "libvirt-daemon-driver-qemu-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "1ab4af6df4fe161c5758fc3677a93fa0e922eab8f9d8c003b3564563e059d7ee",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-daemon-driver-qemu-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-daemon-driver-qemu-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9411,10 +9411,10 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-daemon-driver-secret-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "fd0393c71231a5f084cf494f5fd1ddfee588c7a814cbfc6d7564f2ca4f3974bd",
+    name = "libvirt-daemon-driver-secret-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "249841c3e154b551685ad3f4f85f56c52810635d3d8aad8bbd3e167e0c4d6046",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-daemon-driver-secret-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-daemon-driver-secret-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9459,10 +9459,10 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-daemon-driver-storage-core-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "9dfd656c495840857631c2ca6ab928c1ed8d2266c22b566c6dde9d03b50e58be",
+    name = "libvirt-daemon-driver-storage-core-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "68ca1056b09d79f7dba925b05260e152058a52ea6efb01bf370d3a857d9fd96c",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-daemon-driver-storage-core-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-daemon-driver-storage-core-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9515,18 +9515,18 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-daemon-log-0__11.10.0-10.2.el10nv.aarch64",
-    sha256 = "7031e88771d4e927bf9a3f9ed68ebb0c9ab59a1477694eec0c240f4da95e01d2",
+    name = "libvirt-daemon-log-0__11.10.0-10.3.el10nv.aarch64",
+    sha256 = "9f9a47f50d08cab3b3cf1b2063a4795eae17d46714062a62d07d5c21db31b3d1",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/aarch64/libvirt-daemon-log-11.10.0-10.2.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/aarch64/libvirt-daemon-log-11.10.0-10.3.el10nv.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "libvirt-daemon-log-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "682e300d080889edc0e3ef281c01b0011a4709fe34a929b770ccbab0de3c7e0a",
+    name = "libvirt-daemon-log-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "47d30839816b7da169ca350f44e0f2ec1245dcaaab3fbbb713f9d219943cf1e9",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-daemon-log-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-daemon-log-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9582,18 +9582,18 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-devel-0__11.10.0-10.2.el10nv.aarch64",
-    sha256 = "9ea53e43b4fed80df7a9f52d91c34cb65d09e9b392075a41908b023e81180d2f",
+    name = "libvirt-devel-0__11.10.0-10.3.el10nv.aarch64",
+    sha256 = "0dfd82be43fa529df3958d02162ef88f710da7d7d83b68841105fa318e4b0e30",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/aarch64/libvirt-devel-11.10.0-10.2.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/aarch64/libvirt-devel-11.10.0-10.3.el10nv.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "libvirt-devel-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "03f300e4f84832200532e23d9539e132e375faae1b1c0f7dcac7605574cea145",
+    name = "libvirt-devel-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "958089e2bb7b544e324de3879f8b5d49ba3745c7d30f709d489d8c2d466ec83e",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-devel-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-devel-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
@@ -9655,18 +9655,18 @@ rpm(
 )
 
 rpm(
-    name = "libvirt-libs-0__11.10.0-10.2.el10nv.aarch64",
-    sha256 = "cc03cb4016a692c1e0705b27bbe24467d2b4da48c4342c251219ac88ff792a1c",
+    name = "libvirt-libs-0__11.10.0-10.3.el10nv.aarch64",
+    sha256 = "2682fcf468f9a539d8ff26eb1a604adfded69cdd4f05fe2662aee471623250cd",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/aarch64/libvirt-libs-11.10.0-10.2.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/aarch64/libvirt-libs-11.10.0-10.3.el10nv.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "libvirt-libs-0__11.10.0-10.2.el10nv.x86_64",
-    sha256 = "28c31a92d252b9453f10669aaaed38496c5b1ecd125230ddea0f3ef1412377bc",
+    name = "libvirt-libs-0__11.10.0-10.3.el10nv.x86_64",
+    sha256 = "ce8bd4ec3f4d11bf975757408441b1d4a28a924306f9be87245c523ff9ceb016",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.2.el10nv/x86_64/libvirt-libs-11.10.0-10.2.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/libvirt/11.10.0/10.3.el10nv/x86_64/libvirt-libs-11.10.0-10.3.el10nv.x86_64.rpm",
     ],
 )
 
