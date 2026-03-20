@@ -88,7 +88,7 @@ discover_latest_release() {
     local package=$1
     local version=$2
     curl -sSL "${KOJI_BASE_URL}/${package}/${version}/" |
-        grep -oP 'href="\K[^"]*\.el10nv(?=/")' |
+        grep -oP 'href="\K[^"]*\.el10nv[^"]*(?=/")' |
         grep -v ',draft_' |
         sort -V | tail -1
 }
