@@ -149,8 +149,13 @@ find_old_names() {
 
     IFS=',' read -ra arch_list <<<"${arches}"
     for arch in "${arch_list[@]}"; do
+        # Check for existing el10nv entries first (from a previous sync),
+        # then fall back to base el10 entries (first-time sync).
         local old_name
-        old_name=$(grep -oP "name = \"\K${subpkg}-\d+__[^\"]*\.el10\.${arch}" "${WORKSPACE_FILE}" | head -1 || true)
+        old_name=$(grep -oP "name = \"\K${subpkg}-\d+__[^\"]*\.el10nv\.${arch}" "${WORKSPACE_FILE}" | head -1 || true)
+        if [[ -z "${old_name}" ]]; then
+            old_name=$(grep -oP "name = \"\K${subpkg}-\d+__[^\"]*\.el10\.${arch}" "${WORKSPACE_FILE}" | head -1 || true)
+        fi
         if [[ -n "${old_name}" ]]; then
             OLD_NAMES["${subpkg}:${arch}"]="${old_name}"
         fi
