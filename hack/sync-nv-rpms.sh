@@ -334,3 +334,15 @@ for key in "${!OLD_NAMES[@]}"; do
 done
 
 echo "Updated rpm/BUILD.bazel: ${build_count} references updated"
+
+# ---------------------------------------------------------------------------
+# 8. Update sandbox hash in hack/bootstrap.sh
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Updating sandbox hash..."
+
+sandbox_hash=$(sha256sum "${BUILD_FILE}" | head -c 40)
+sed -i "/^[[:blank:]]*sandbox_hash[[:blank:]]*=/s/=.*/=\"${sandbox_hash}\"/" "${SCRIPT_DIR}/bootstrap.sh"
+
+echo "Updated sandbox hash: ${sandbox_hash}"
