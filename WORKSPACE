@@ -12968,18 +12968,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-img-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "74f8404e08ac551bd94877b3133dc84045a4f6f39d0584e74ed4a74b1eee84c9",
+    name = "qemu-img-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "d41d3d273c21733b6ec1a8fc3981e0041380419dfac9b387a422d3ded2ebc40a",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-img-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-img-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-img-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "59a57faea459bb00a5cf589ec1be09b14f9deecb67e88ea67a377db6f7b61b66",
+    name = "qemu-img-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "655ab6b503f88b05a52249154a0ae48d8e56e984d03c3624e67bd8ca3bf70881",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-img-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-img-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13041,18 +13041,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-common-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "08be37e5c3a4985f5bd6702c0eb82b7a3ab9cf4b0dc1d44c8d29d461bd03bafc",
+    name = "qemu-kvm-common-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "6382236e24101ddbb3076c8e870da6e959634023a5fbdd5dca1cdf43480740e6",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-kvm-common-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-kvm-common-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-kvm-common-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "11cf7be8511ed16fe44bc1eb1e14a9bf6eaaa07c4f9bcc4f324089da4d1b3c39",
+    name = "qemu-kvm-common-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "02c9260c926d3f69062714c6c45fb71868e31ee0d88124ffe97ed96e6d5296d9",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-common-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-common-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13114,18 +13114,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-core-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "b5f06008342765fc0e0e258def27b85cfd282fcca6f4355477af44676bfdbed8",
+    name = "qemu-kvm-core-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "f8c875f527bc7cc6113da30967aa0ff5ca32c6f0d8764250ab1071c07b840deb",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-kvm-core-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-kvm-core-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-kvm-core-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "d60fb0fe53a1c02abe8989be2ada4a21251f729d696d33f3ae0d91cee767dd5c",
+    name = "qemu-kvm-core-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "f34584610728659c9fecd2a414ecc9439c0792d0ce276280182e0af8eabf797a",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-core-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-core-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13181,18 +13181,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-device-display-virtio-gpu-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "d8512fd4df75fa22d4ab3c6a72b8ca0a834acd533fa48330b1d3726f387cad15",
+    name = "qemu-kvm-device-display-virtio-gpu-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "2c17ebbf7486344eeaa7f7d0ccd45753541f5ebf98e7c176d45d0364d364863e",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-kvm-device-display-virtio-gpu-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-kvm-device-display-virtio-gpu-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-kvm-device-display-virtio-gpu-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "cd83df6194b97dbd149847c64eb1fed8f65d7a099e8552c7d5a019f0a598604b",
+    name = "qemu-kvm-device-display-virtio-gpu-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "4245f06f733e2ce18a8670687b4bb790fd040020cf07f543cfaf1b51a768fc62",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-device-display-virtio-gpu-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-device-display-virtio-gpu-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13248,18 +13248,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-device-display-virtio-gpu-pci-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "a9b2a16e1306fb42e5c23b3420d783bc59366b916fce9dc77d5314163f0175e9",
+    name = "qemu-kvm-device-display-virtio-gpu-pci-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "6b7fbb294d331044959549b9e7d2e9958e87b96b36e84d1d3275d065d431979f",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-kvm-device-display-virtio-gpu-pci-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-kvm-device-display-virtio-gpu-pci-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-kvm-device-display-virtio-gpu-pci-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "0bc1a62156f39a4f04a8d2d34e870bb992ec18f5763f7170086e9311baf27588",
+    name = "qemu-kvm-device-display-virtio-gpu-pci-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "617c74aa53b57939c5219fb32a1d9e226c5be57707535f3ab0f19ebdf0cfcbf7",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-device-display-virtio-gpu-pci-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-device-display-virtio-gpu-pci-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13281,10 +13281,10 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-device-display-virtio-vga-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "401af01e4219f96a4715d85d2b5ca724f92b6f37d7cf8d29a890e9b96f988b20",
+    name = "qemu-kvm-device-display-virtio-vga-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "04827a25bbc19b5d7aadeb24c3225bac3099379f8935f827e20fb889f5c86d88",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-device-display-virtio-vga-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-device-display-virtio-vga-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13340,18 +13340,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-device-usb-host-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "a26d89d79b551d92604e7673ba9dda94cb0a40bd69dd3386d42167fd97324519",
+    name = "qemu-kvm-device-usb-host-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "183adc08d634285c3c9f485b7a8086b2153ce186017ce90b0a534e1ee1a4342b",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-kvm-device-usb-host-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-kvm-device-usb-host-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-kvm-device-usb-host-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "5e40c7051be50bef86a5ed26229098f00516d803aab422d579a06e43f2cd10b6",
+    name = "qemu-kvm-device-usb-host-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "0c0f7afce9a9509c8fb87235ac9971f0a19572a3845565187f2f46f0689b945b",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-device-usb-host-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-device-usb-host-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13390,18 +13390,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-kvm-device-usb-redirect-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "f260bde92f93c976600e3847514366304c7deef914e912ad7124bacfc2d0f84f",
+    name = "qemu-kvm-device-usb-redirect-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "e9b93c4dac60129c6e4b32ef517a86be32ca952ec49f6e01d49000045c238130",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-kvm-device-usb-redirect-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-kvm-device-usb-redirect-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-kvm-device-usb-redirect-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "22265fda27efe8e52e660b04404998d715c14c18ad67b623cc28666e5ed725ca",
+    name = "qemu-kvm-device-usb-redirect-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "dd0aadddf6e707bdd9818b96339002d50d5facf2e3be79ea8a23e21483d53c6e",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-kvm-device-usb-redirect-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-kvm-device-usb-redirect-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
@@ -13440,18 +13440,18 @@ rpm(
 )
 
 rpm(
-    name = "qemu-pr-helper-19__10.1.0-12.el10nv.aarch64",
-    sha256 = "b28b93b01d5c27b97d66aaa559e7b2d76527d476ebe6da88ffbf5f67cf901f67",
+    name = "qemu-pr-helper-19__10.1.0-13.el10nv.1.aarch64",
+    sha256 = "be3245c9d811e1b43be7ea874e1aab28a27b41c34caa07e54cd7ffb9c2b0beec",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/aarch64/qemu-pr-helper-10.1.0-12.el10nv.aarch64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/aarch64/qemu-pr-helper-10.1.0-13.el10nv.1.aarch64.rpm",
     ],
 )
 
 rpm(
-    name = "qemu-pr-helper-19__10.1.0-12.el10nv.x86_64",
-    sha256 = "a08c2cd6c044ce202dfacabc8c15e9cd45fc19c32c36330c34b057e0b3f68c7f",
+    name = "qemu-pr-helper-19__10.1.0-13.el10nv.1.x86_64",
+    sha256 = "6ac968d2d3f3c24fc9c0af7064fcdade3e01b66d4707daf9f78842fe444b8559",
     urls = [
-        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/12.el10nv/x86_64/qemu-pr-helper-10.1.0-12.el10nv.x86_64.rpm",
+        "https://kojihub.stream.centos.org/kojifiles/packages/qemu-kvm/10.1.0/13.el10nv.1/x86_64/qemu-pr-helper-10.1.0-13.el10nv.1.x86_64.rpm",
     ],
 )
 
