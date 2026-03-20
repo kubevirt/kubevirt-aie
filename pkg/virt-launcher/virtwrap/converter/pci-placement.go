@@ -380,6 +380,9 @@ func (a *expanderBusAssigner) placeDevice(topology *numaAwareTopology, device *a
 			},
 		}
 
+		//TODO fix this Hardcoded value (seems like the calculated value results in a domain failure)
+		topology.iommuDev.Driver.Oas = "48"
+
 		// Calculate and accumulate the PCI hole size needed for device BARs
 		size, err := bdf.CalculatePCIHoleSize()
 		if err != nil {
