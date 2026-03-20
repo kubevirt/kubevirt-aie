@@ -88,7 +88,7 @@ discover_latest_release() {
     local package=$1
     local version=$2
     curl -sSL "${KOJI_BASE_URL}/${package}/${version}/" |
-        grep -oP 'href="\K[^"]*\.el10nv(?=/")' |
+        grep -oP 'href="\K[^"]*\.el10nv[^"]*(?=/")' |
         grep -v ',draft_' |
         sort -V | tail -1
 }
@@ -334,3 +334,15 @@ for key in "${!OLD_NAMES[@]}"; do
 done
 
 echo "Updated rpm/BUILD.bazel: ${build_count} references updated"
+
+# ---------------------------------------------------------------------------
+# 8. Update sandbox hash in hack/bootstrap.sh
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Updating sandbox hash..."
+
+sandbox_hash=$(sha256sum "${BUILD_FILE}" | head -c 40)
+sed -i "/^[[:blank:]]*sandbox_hash[[:blank:]]*=/s/=.*/=\"${sandbox_hash}\"/" "${SCRIPT_DIR}/bootstrap.sh"
+
+echo "Updated sandbox hash: ${sandbox_hash}"
