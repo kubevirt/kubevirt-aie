@@ -40,6 +40,7 @@ package virtwrap
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -76,20 +77,43 @@ func ReceiveIOMMUFD(socketPath string) (int, error) {
 	}
 	defer conn.Close()
 
+	log.Log.Infof("Connected to IOMMUFD socket, sleeping 5 seconds before read")
+	time.Sleep(5 * time.Second)
 	// Receive the FD via SCM_RIGHTS
 	// The payload is a single byte; the FD is in the ancillary (out-of-band) data
-	buf := make([]byte, 1)
-	oob := make([]byte, unix.CmsgSpace(4)) // space for one FD (int32)
+	buf := make([]byte, 32)
+	// Allocate generous space for SCM_RIGHTS control message
+	// Need enough space for cmsghdr + fd array + alignment padding
+	oob := make([]byte, 256)
 
-	_, oobn, _, _, err := conn.ReadMsgUnix(buf, oob)
+	log.Log.Infof("About to ReadMsgUnix from IOMMUFD socket, oob buffer size: %d", len(oob))
+	n, oobn, flags, _, err := conn.ReadMsgUnix(buf, oob)
+	// 1. Log the exact state
+	fmt.Printf("Read: n=%d bytes, oobn=%d, flags=%d, data=%v\n", n, oobn, flags, buf[:n])
+	if err != nil {
+		return -1, fmt.Errorf("failed to read from IOMMUFD socket: %w", err)
+	}
+	// 2. Check for truncation
+	if flags&unix.MSG_CTRUNC != 0 {
+		return -1, fmt.Errorf("OOB data was truncated by the kernel")
+	}
+
+	log.Log.Infof("ReadMsgUnix result: n=%d bytes, oobn=%d bytes, flags=%d, err=%v", n, oobn, flags, err)
 	if err != nil {
 		return -1, fmt.Errorf("failed to receive IOMMUFD FD from %s: %w", socketPath, err)
 	}
 
+	if oobn == 0 {
+		return -1, fmt.Errorf("no oobn received from IOMMUFD socket (read %d regular bytes, flags=%d)", n, flags)
+	}
 	// Parse the ancillary data to extract the file descriptor
 	scms, err := unix.ParseSocketControlMessage(oob[:oobn])
 	if err != nil {
 		return -1, fmt.Errorf("failed to parse socket control message: %w", err)
+	}
+
+	if len(scms) == 0 {
+		return -1, fmt.Errorf("no scms received from IOMMUFD socket")
 	}
 
 	fds, err := unix.ParseUnixRights(&scms[0])

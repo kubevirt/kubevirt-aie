@@ -51,18 +51,21 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
-
 	"kubevirt.io/client-go/log"
+
+	"kubevirt.io/kubevirt/pkg/safepath"
+	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
 )
 
 const (
 	// iommuFDSocketDir is the host side directory for IOMMUFD sockets.
 	// This directory is under virt-lib-dir which is already mounted by the
 	// virt-handler DaemonSet. Each socket file will have a  unique name per allocation.
-	iommuFDSocketDir = "/var/lib/kubevirt/fd-sockets"
+	iommuFDSocketDir = "/var/run/kubevirt/fd-sockets"
 
 	// IOMMUFDContainerSocketPath is the fixed path inside virt-launcher pods
 	// where the IOMMUFD socket is mounted. virt-launcher checks for this path
@@ -110,10 +113,10 @@ func openAndConfigureIOMMUFD() (int, error) {
 	// This enables per-process RLIMIT_MEMLOCK accounting for IOMMU mappings,
 	// matching what libvirt expects when managing IOMMUFD-backed devices.
 	option := iommuOption{
-		Size:     32, // size as used by libvirt
-		OptionID: 0,  // IOMMU_OPTION_RLIMIT_MODE
-		Op:       0,  // IOMMU_OPTION_OP_SET
-		Val64:    1,  // true — enable rlimit mode
+		Size:     uint32(unsafe.Sizeof(iommuOption{})), // size as used by libvirt
+		OptionID: 0,                                    // IOMMU_OPTION_RLIMIT_MODE
+		Op:       0,                                    // IOMMU_OPTION_OP_SET
+		Val64:    1,                                    // true — enable rlimit mode
 	}
 
 	_, _, errno := unix.Syscall(
@@ -154,8 +157,20 @@ func openAndConfigureIOMMUFD() (int, error) {
 //   - hostSocketPath: the full path to the socket file on the host
 //   - err: any error during socket creation
 func createIOMMUFDSocket(iommuFD int, uniqueID string) (string, error) {
-	if err := os.MkdirAll(iommuFDSocketDir, 0755); err != nil {
+	if err := os.MkdirAll(iommuFDSocketDir, 0766); err != nil {
 		return "", fmt.Errorf("failed to create socket directory %s: %w", iommuFDSocketDir, err)
+	}
+
+	if se, exists, err := selinux.NewSELinux(); err == nil && exists {
+		safeIommuSocketDir, err := safepath.NewPathNoFollow(iommuFDSocketDir)
+		if err != nil {
+			return "", err
+		}
+		if err := selinux.RelabelFilesUnprivileged(se.IsPermissive(), safeIommuSocketDir); err != nil {
+			return "", fmt.Errorf("failed to relabel iommu fd socket directory %s: %w", iommuFDSocketDir, err)
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("failed to detect SELinux: %w", err)
 	}
 
 	hostSocketPath := filepath.Join(iommuFDSocketDir, fmt.Sprintf("iommufd-%s.sock", uniqueID))
@@ -175,6 +190,17 @@ func createIOMMUFDSocket(iommuFD int, uniqueID string) (string, error) {
 		return "", fmt.Errorf("failed to chmod socket %s: %w", hostSocketPath, err)
 	}
 
+	if se, exists, err := selinux.NewSELinux(); err == nil && exists {
+		safeHostSocketPath, err := safepath.NewPathNoFollow(hostSocketPath)
+		if err != nil {
+			return "", err
+		}
+		if err := selinux.RelabelFilesUnprivileged(se.IsPermissive(), safeHostSocketPath); err != nil {
+			listener.Close()
+			return "", fmt.Errorf("failed to relabel iommu fd socket %s: %w", hostSocketPath, err)
+		}
+	}
+
 	log.DefaultLogger().V(3).Infof("IOMMUFD socket created at %s, waiting for virt-launcher connection", hostSocketPath)
 
 	// One-shot goroutine: accept one connection, send FD, clean up
@@ -188,15 +214,19 @@ func createIOMMUFDSocket(iommuFD int, uniqueID string) (string, error) {
 			log.DefaultLogger().Errorf("IOMMUFD socket accept failed: %v", err)
 			return
 		}
+		log.DefaultLogger().V(3).Info("Accepted")
 		defer conn.Close()
 
 		// Send the IOMMUFD FD via SCM_RIGHTS
 		rights := unix.UnixRights(iommuFD)
-		if _, _, err := conn.WriteMsgUnix([]byte{0}, rights, nil); err != nil {
+		log.DefaultLogger().V(3).Infof("IOMMUFD rights: %s", rights)
+		wb, woob, err := conn.WriteMsgUnix([]byte{0}, rights, nil)
+		if err != nil {
 			log.DefaultLogger().Errorf("IOMMUFD socket WriteMsgUnix failed: %v", err)
 			return
 		}
-
+		log.DefaultLogger().V(3).Infof("IOMMUFD socket WriteMsgUnix succeeded: written b: %d, written oob: %d", wb, woob)
+		time.Sleep(500 * time.Second)
 		log.DefaultLogger().V(3).Infof("IOMMUFD FD sent to virt-launcher via %s", hostSocketPath)
 	}()
 
