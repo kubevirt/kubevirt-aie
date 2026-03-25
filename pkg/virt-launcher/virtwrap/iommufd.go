@@ -40,7 +40,6 @@ package virtwrap
 import (
 	"fmt"
 	"net"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -77,54 +76,39 @@ func ReceiveIOMMUFD(socketPath string) (int, error) {
 	}
 	defer conn.Close()
 
-	log.Log.Infof("Connected to IOMMUFD socket, sleeping 5 seconds before read")
-	time.Sleep(5 * time.Second)
-	// Receive the FD via SCM_RIGHTS
-	// The payload is a single byte; the FD is in the ancillary (out-of-band) data
 	buf := make([]byte, 32)
-	// Allocate generous space for SCM_RIGHTS control message
-	// Need enough space for cmsghdr + fd array + alignment padding
-	oob := make([]byte, 256)
+	oob := make([]byte, 4096)
 
-	log.Log.Infof("About to ReadMsgUnix from IOMMUFD socket, oob buffer size: %d", len(oob))
 	n, oobn, flags, _, err := conn.ReadMsgUnix(buf, oob)
-	// 1. Log the exact state
-	fmt.Printf("Read: n=%d bytes, oobn=%d, flags=%d, data=%v\n", n, oobn, flags, buf[:n])
 	if err != nil {
 		return -1, fmt.Errorf("failed to read from IOMMUFD socket: %w", err)
 	}
-	// 2. Check for truncation
-	if flags&unix.MSG_CTRUNC != 0 {
-		return -1, fmt.Errorf("OOB data was truncated by the kernel")
-	}
 
-	log.Log.Infof("ReadMsgUnix result: n=%d bytes, oobn=%d bytes, flags=%d, err=%v", n, oobn, flags, err)
-	if err != nil {
-		return -1, fmt.Errorf("failed to receive IOMMUFD FD from %s: %w", socketPath, err)
-	}
+	log.Log.V(4).Infof("ReadMsgUnix: n=%d oobn=%d flags=0x%x", n, oobn, flags)
 
 	if oobn == 0 {
-		return -1, fmt.Errorf("no oobn received from IOMMUFD socket (read %d regular bytes, flags=%d)", n, flags)
+		return -1, fmt.Errorf("no out-of-band data received (n=%d)", n)
 	}
-	// Parse the ancillary data to extract the file descriptor
+
 	scms, err := unix.ParseSocketControlMessage(oob[:oobn])
 	if err != nil {
-		return -1, fmt.Errorf("failed to parse socket control message: %w", err)
+		return -1, fmt.Errorf("failed to parse socket control messages: %w", err)
 	}
 
-	if len(scms) == 0 {
-		return -1, fmt.Errorf("no scms received from IOMMUFD socket")
+	for _, cmsg := range scms {
+		if cmsg.Header.Level == unix.SOL_SOCKET && cmsg.Header.Type == unix.SCM_RIGHTS {
+			fds, err := unix.ParseUnixRights(&cmsg)
+			if err != nil {
+				return -1, fmt.Errorf("failed to parse unix rights: %w", err)
+			}
+			if len(fds) > 0 {
+				log.Log.V(3).Infof("successfully received IOMMUFD fd=%d", fds[0])
+				// Send ACK so sender can close cleanly
+				conn.Write([]byte{0})
+				return fds[0], nil
+			}
+		}
 	}
 
-	fds, err := unix.ParseUnixRights(&scms[0])
-	if err != nil {
-		return -1, fmt.Errorf("failed to parse unix rights: %w", err)
-	}
-
-	if len(fds) == 0 {
-		return -1, fmt.Errorf("no file descriptors received from IOMMUFD socket")
-	}
-
-	log.Log.V(3).Infof("Received IOMMUFD file descriptor %d from %s", fds[0], socketPath)
-	return fds[0], nil
+	return -1, fmt.Errorf("OOB data received but no SCM_RIGHTS found")
 }

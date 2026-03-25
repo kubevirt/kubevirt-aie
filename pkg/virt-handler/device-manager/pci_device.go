@@ -204,11 +204,11 @@ func (dpi *PCIDevicePlugin) Allocate(_ context.Context, r *pluginapi.AllocateReq
 		// The socket is bind-mounted into the container at a fixed path so
 		// virt-launcher can find it.
 		if iommufdSupported {
-			iommuFD, err := openAndConfigureIOMMUFD()
+			socketID := uuid.New().String()
+			iommuFD, err := openAndConfigureIOMMUFD(socketID)
 			if err != nil {
 				logger.Warningf("failed to open/configure IOMMUFD: %v", err)
 			} else {
-				socketID := uuid.New().String()
 				hostSocketPath, err := createIOMMUFDSocket(iommuFD, socketID)
 				if err != nil {
 					logger.Warningf("failed to create IOMMUFD socket: %v", err)

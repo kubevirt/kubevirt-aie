@@ -51,7 +51,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -103,10 +102,10 @@ type iommuOption struct {
 // The returned file descriptor must be passed to virt-launcher and eventually
 // to libvirt via virDomainFDAssociate. The caller is responsible for closing
 // the FD if createIOMMUFDSocket is not called.
-func openAndConfigureIOMMUFD() (int, error) {
-	fd, err := unix.Open("/dev/iommu", unix.O_RDWR|unix.O_CLOEXEC, 0)
+func openAndConfigureIOMMUFD(uniqueID string) (int, error) {
+	fd, err := openUnprivilegedIOMMUFD(uniqueID)
 	if err != nil {
-		return -1, fmt.Errorf("failed to open /dev/iommu: %w", err)
+		return -1, err
 	}
 
 	// Set IOMMU_OPTION_RLIMIT_MODE = true
@@ -131,6 +130,68 @@ func openAndConfigureIOMMUFD() (int, error) {
 	}
 
 	log.DefaultLogger().V(3).Infof("Opened and configured IOMMUFD (fd=%d, rlimit_mode=true)", fd)
+	return fd, nil
+}
+
+// openUnprivilegedIOMMUFD creates a temporary device node for /dev/iommu,
+// relabels it with the container-friendly SELinux context, and returns an FD
+// that virt-launcher is allowed to receive via SCM_RIGHTS.
+//
+// Why not just open /dev/iommu directly?
+// When an FD is passed over a Unix domain socket via SCM_RIGHTS, the kernel
+// calls security_file_receive() on the receiving end. If SELinux is enforcing,
+// it checks whether the receiving process's context (container_t) is allowed
+// to use an FD with the source file's context (device_t for /dev/iommu).
+// Since container_t is not permitted to access device_t, the kernel silently
+// drops the FD and sets MSG_CTRUNC — the receiver gets oobn=0 with no error
+// from the sender's perspective.
+//
+// The workaround is to create a temporary character device node with the same
+// major/minor as /dev/iommu, relabel it to a context that container_t can
+// receive (using the same relabeling that KubeVirt applies to sockets), and
+// open the FD from that relabeled node. The resulting FD carries the
+// container-friendly label and passes security_file_receive() successfully.
+func openUnprivilegedIOMMUFD(uniqueID string) (int, error) {
+	// 1. Get major/minor of the real /dev/iommu
+	var stat unix.Stat_t
+	if err := unix.Stat("/dev/iommu", &stat); err != nil {
+		return -1, fmt.Errorf("failed to stat /dev/iommu: %w", err)
+	}
+
+	// 2. Create temporary char device node inside the already-relabeled socket dir
+	tmpNodePath := filepath.Join(iommuFDSocketDir, fmt.Sprintf("iommu-tmp-%s.dev", uniqueID))
+	os.Remove(tmpNodePath)
+
+	if err := unix.Mknod(tmpNodePath, unix.S_IFCHR|0600, int(stat.Rdev)); err != nil {
+		return -1, fmt.Errorf("mknod failed for temporary iommu node: %w", err)
+	}
+	defer os.Remove(tmpNodePath)
+
+	// 3. Relabel it exactly like we do for the socket
+	if se, exists, err := selinux.NewSELinux(); err == nil && exists {
+		safePath, err := safepath.NewPathNoFollow(tmpNodePath)
+		if err != nil {
+			return -1, fmt.Errorf("safepath failed: %w", err)
+		}
+		if err := selinux.RelabelFilesUnprivileged(se.IsPermissive(), safePath); err != nil {
+			return -1, fmt.Errorf("failed to relabel temporary iommu node: %w", err)
+		}
+	}
+
+	// 4. Open the relabeled node and the FD now carries the correct SELinux context
+	f, err := os.OpenFile(tmpNodePath, os.O_RDWR|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, fmt.Errorf("failed to open relabeled iommu node: %w", err)
+	}
+
+	// 5. extract the raw FD
+	fd, err := unix.Dup(int(f.Fd()))
+	f.Close()
+	if err != nil {
+		return -1, fmt.Errorf("dup failed: %w", err)
+	}
+
+	log.DefaultLogger().V(3).Infof("created unprivileged IOMMUFD from relabeled node (fd=%d)", fd)
 	return fd, nil
 }
 
@@ -205,6 +266,8 @@ func createIOMMUFDSocket(iommuFD int, uniqueID string) (string, error) {
 
 	// One-shot goroutine: accept one connection, send FD, clean up
 	go func() {
+		log.DefaultLogger().V(3).Infof("IOMMUFD listener goroutine started (fd=%d, socket=%s)", iommuFD, hostSocketPath)
+
 		defer listener.Close()
 		defer os.Remove(hostSocketPath)
 		defer unix.Close(iommuFD)
@@ -214,20 +277,23 @@ func createIOMMUFDSocket(iommuFD int, uniqueID string) (string, error) {
 			log.DefaultLogger().Errorf("IOMMUFD socket accept failed: %v", err)
 			return
 		}
-		log.DefaultLogger().V(3).Info("Accepted")
 		defer conn.Close()
 
-		// Send the IOMMUFD FD via SCM_RIGHTS
+		log.DefaultLogger().V(3).Infof("IOMMUFD connection accepted, sending FD %d", iommuFD)
+
 		rights := unix.UnixRights(iommuFD)
-		log.DefaultLogger().V(3).Infof("IOMMUFD rights: %s", rights)
-		wb, woob, err := conn.WriteMsgUnix([]byte{0}, rights, nil)
-		if err != nil {
+		if _, _, err := conn.WriteMsgUnix([]byte{0}, rights, nil); err != nil {
 			log.DefaultLogger().Errorf("IOMMUFD socket WriteMsgUnix failed: %v", err)
 			return
 		}
-		log.DefaultLogger().V(3).Infof("IOMMUFD socket WriteMsgUnix succeeded: written b: %d, written oob: %d", wb, woob)
-		time.Sleep(500 * time.Second)
-		log.DefaultLogger().V(3).Infof("IOMMUFD FD sent to virt-launcher via %s", hostSocketPath)
+
+		// Keep the connection alive until the rootless receiver has read everything
+		ack := make([]byte, 1)
+		if _, err := conn.Read(ack); err != nil {
+			log.DefaultLogger().Warningf("IOMMUFD ACK read failed (non-fatal): %v", err)
+		} else {
+			log.DefaultLogger().V(3).Infof("IOMMUFD FD successfully passed and ACK received (fd=%d)", iommuFD)
+		}
 	}()
 
 	return hostSocketPath, nil
