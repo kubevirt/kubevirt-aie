@@ -26,20 +26,21 @@ KUBEVIRT_CS10_BUILDER_VERSION=${KUBEVIRT_CS10_BUILDER_VERSION:-"2602251001-25ce1
 branch=$(git rev-parse --abbrev-ref HEAD)
 short_sha=$(git rev-parse --short=10 HEAD)
 docker_tag="wip-${branch}-${short_sha}"
+DOCKER_TAG=${DOCKER_TAG:-"${docker_tag}"}
 
 echo "Building and pushing virt-launcher manifest"
 echo "  DOCKER_PREFIX: ${DOCKER_PREFIX}"
-echo "  DOCKER_TAG:    ${docker_tag}"
+echo "  DOCKER_TAG:    ${DOCKER_TAG}"
 echo "  KUBEVIRT_CENTOS_STREAM_VERSION: ${KUBEVIRT_CENTOS_STREAM_VERSION}"
 echo "  KUBEVIRT_CS10_BUILDER_VERSION:  ${KUBEVIRT_CS10_BUILDER_VERSION}"
 echo ""
-echo "  Image: ${DOCKER_PREFIX}/virt-launcher:${docker_tag}"
+echo "  Image: ${DOCKER_PREFIX}/virt-launcher:${DOCKER_TAG}"
 echo ""
 
 export KUBEVIRT_CENTOS_STREAM_VERSION
 export KUBEVIRT_CS10_BUILDER_VERSION
 export DOCKER_PREFIX
-export DOCKER_TAG="${docker_tag}"
+export DOCKER_TAG
 export BUILD_ARCH="amd64,crossbuild-aarch64"
 export PUSH_TARGETS="virt-launcher"
 
