@@ -76,7 +76,7 @@ for tag in ${docker_tag} ${docker_tag_alt}; do
     for target in ${PUSH_TARGETS[@]}; do
 
         bazel run \
-            --config=${ARCHITECTURE} ${BAZEL_CS_CONFIG} \
+            --config=${ARCHITECTURE} ${BAZEL_CS_CONFIG} ${BAZEL_DEBUGINFO_FLAG} \
             //:push-${target} -- --repository ${docker_prefix}/${image_prefix}${target} --tag ${tag}
 
     done
@@ -87,7 +87,7 @@ if [[ $image_prefix_alt ]]; then
     for target in ${PUSH_TARGETS[@]}; do
 
         bazel run \
-            --config=${ARCHITECTURE} ${BAZEL_CS_CONFIG} \
+            --config=${ARCHITECTURE} ${BAZEL_CS_CONFIG} ${BAZEL_DEBUGINFO_FLAG} \
             //:push-${target} -- --repository ${docker_prefix}/${image_prefix_alt}${target} --tag ${docker_tag}
 
     done
