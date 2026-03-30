@@ -261,12 +261,60 @@ generate_insert_file() {
 
         local last_el10="${LAST_EL10[${subpkg}]:-}"
         if [[ -z "${last_el10}" ]]; then
-            echo "WARNING: No el10 entry found for ${subpkg}, skipping" >&2
+            # Debug packages (debuginfo/debugsource) are NV-only and have no
+            # base el10 entry to anchor against.  Append their rpm() entries
+            # to the insert file of the corresponding non-debug parent package
+            # so they are inserted alongside it.
+            local parent_pkg="${subpkg%-debuginfo}"
+            parent_pkg="${parent_pkg%-debugsource}"
+            if [[ "${parent_pkg}" == "${subpkg}" ]]; then
+                echo "WARNING: No el10 entry found for ${subpkg}, skipping" >&2
+                continue
+            fi
+            local parent_anchor="${LAST_EL10[${parent_pkg}]:-}"
+            # Fallback: find any managed sub-package matching the parent
+            # prefix (e.g. libvirt-debuginfo -> libvirt-libs).
+            if [[ -z "${parent_anchor}" ]]; then
+                for pkg_key in "${!LAST_EL10[@]}"; do
+                    if [[ "${pkg_key}" == "${parent_pkg}" || "${pkg_key}" == "${parent_pkg}-"* ]]; then
+                        if [[ -z "${parent_anchor}" ]] || [[ "${LAST_EL10[${pkg_key}]}" > "${parent_anchor}" ]]; then
+                            parent_anchor="${LAST_EL10[${pkg_key}]}"
+                        fi
+                    fi
+                done
+            fi
+            if [[ -z "${parent_anchor}" ]]; then
+                echo "WARNING: No el10 entry found for ${subpkg} or parent ${parent_pkg}, skipping" >&2
+                continue
+            fi
+            local insert_file="${INSERT_FILES[${parent_anchor}]:-${TMPDIR}/insert_${parent_pkg}.txt}"
+            INSERT_FILES["${parent_anchor}"]="${insert_file}"
+            IFS=',' read -ra arch_list <<<"${arches}"
+            for arch in "${arch_list[@]}"; do
+                local key="${subpkg}:${arch}"
+                if [[ -z "${NEW_NAMES[${key}]:-}" ]]; then
+                    continue
+                fi
+                cat >>"${insert_file}" <<EOF
+
+rpm(
+    name = "${NEW_NAMES[${key}]}",
+    sha256 = "${SHA256S[${key}]}",
+    urls = [
+        "${RPM_URLS[${key}]}",
+    ],
+)
+EOF
+            done
             continue
         fi
 
-        local insert_file="${TMPDIR}/insert_${subpkg}.txt"
-        : >"${insert_file}"
+        # Reuse an existing insert file if a debug package already claimed
+        # this anchor (e.g. libvirt-debuginfo processed before libvirt-libs).
+        local insert_file="${INSERT_FILES[${last_el10}]:-${TMPDIR}/insert_${subpkg}.txt}"
+        if [[ -z "${INSERT_FILES[${last_el10}]:-}" ]]; then
+            : >"${insert_file}"
+        fi
         local has_entries=false
 
         IFS=',' read -ra arch_list <<<"${arches}"
