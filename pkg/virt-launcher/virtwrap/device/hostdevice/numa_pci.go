@@ -95,6 +95,7 @@ var (
 	isIOMMUFDDeviceAvailableFunc   = isIOMMUFDDeviceAvailable
 	discoverEGMDevicesFunc         = hardware.DiscoverEGMDevices
 	statEGMDevicePathFunc          = os.Stat
+	readPCIDeviceFileFunc          = os.ReadFile
 )
 
 // NormalizeHotplugRootPortAlias strips any user-alias prefixes (like "ua-") that libvirt may add.
@@ -155,7 +156,13 @@ type pxbInfo struct {
 type rootPortInfo struct {
 	controllerIndex int
 	downstreamBus   int
+	qemuID          string
 	pcieSwitch      *pcieSwitchInfo // Optional: PCIe switch attached to this root port
+}
+
+type pcieLinkCharacteristics struct {
+	speed string
+	width string
 }
 
 // pcieSwitchInfo tracks a PCIe switch hierarchy (upstream + downstream ports)
@@ -476,7 +483,6 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 	planner.addDefaultRootPort()
 	graceTopology := buildGraceTopologyPlan(domain, devicesWithNUMA, graceHostDevicesEnabled)
 	applyGraceTopologyPlan(domain, graceTopology)
-
 	for _, key := range groupKeys {
 		infos := grouped[key]
 		if len(infos) == 0 {
@@ -496,6 +502,8 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 			log.Log.Reason(err).Errorf("failed to create PCI expander bus for host NUMA %d (guest NUMA %d)", key.hostNUMANode, key.guestNUMANode)
 			continue
 		}
+
+		linkCharacteristics := deriveGuestRootPortLinkCharacteristics(key.pathKey, infos)
 
 		// Determine if we need a PCIe switch for this group
 		// Physical topology patterns:
@@ -518,6 +526,7 @@ func ApplyNUMAHostDeviceTopology(vmi *v1.VirtualMachineInstance, domain *api.Dom
 			log.Log.Reason(err).Error("failed to allocate root port for host device path")
 			continue
 		}
+		applyGuestRootPortLinkCharacteristics(domain, rootPort, linkCharacteristics)
 
 		for _, info := range infos {
 			if info.iommuGroup >= 0 {
@@ -744,6 +753,7 @@ func newNUMAPCIPlanner(domain *api.Domain) *numaPCIPlanner {
 					planner.existingRootPorts[aliasName] = &rootPortInfo{
 						controllerIndex: idx,
 						downstreamBus:   downstreamBus,
+						qemuID:          api.UserAliasPrefix + aliasName,
 					}
 				}
 			} else if ctrl.Model == "pcie-root-port" && IsHotplugRootPortAlias(aliasName) {
@@ -1078,6 +1088,7 @@ func (p *numaPCIPlanner) addRootPort(info *pxbInfo, alias string) (*rootPortInfo
 	return &rootPortInfo{
 		controllerIndex: index,
 		downstreamBus:   downstreamBus,
+		qemuID:          api.UserAliasPrefix + alias,
 	}, nil
 }
 
@@ -1549,6 +1560,230 @@ func removeGraceSMMUv3QEMUArgs(domain *api.Domain) {
 		return
 	}
 	domain.Spec.QEMUCmd.QEMUArg = filtered
+}
+
+func deriveGuestRootPortLinkCharacteristics(pathKey string, infos []deviceNUMAInfo) *pcieLinkCharacteristics {
+	if pathKey != "" {
+		if current := derivePCIeLinkCharacteristicsFromPath(strings.Split(pathKey, "/")); current != nil {
+			return current
+		}
+	}
+	for i := range infos {
+		if current := derivePCIeLinkCharacteristicsFromPath(infos[i].path); current != nil {
+			return current
+		}
+	}
+	return nil
+}
+
+func derivePCIeLinkCharacteristicsFromPath(path []string) *pcieLinkCharacteristics {
+	var result *pcieLinkCharacteristics
+	seen := make(map[string]struct{}, len(path))
+	for _, bdf := range path {
+		if bdf == "" {
+			continue
+		}
+		if _, exists := seen[bdf]; exists {
+			continue
+		}
+		seen[bdf] = struct{}{}
+
+		speed := readPCIeLinkSpeedForBDF(bdf)
+		width := readPCIeLinkWidthForBDF(bdf)
+		if speed == "" && width == "" {
+			continue
+		}
+
+		if result == nil {
+			result = &pcieLinkCharacteristics{speed: speed, width: width}
+			continue
+		}
+
+		if speed != "" && (result.speed == "" || comparePCIeSpeed(speed, result.speed) < 0) {
+			result.speed = speed
+		}
+		if width != "" && (result.width == "" || comparePCIeWidth(width, result.width) < 0) {
+			result.width = width
+		}
+	}
+	return result
+}
+
+func readPCIeLinkSpeedForBDF(bdf string) string {
+	for _, attr := range []string{"current_link_speed", "max_link_speed"} {
+		data, err := readPCIDeviceFileFunc(filepath.Join("/sys/bus/pci/devices", bdf, attr))
+		if err != nil {
+			continue
+		}
+		if speed := normalizePCIeLinkSpeed(string(data)); speed != "" {
+			return speed
+		}
+	}
+	return ""
+}
+
+func readPCIeLinkWidthForBDF(bdf string) string {
+	for _, attr := range []string{"current_link_width", "max_link_width"} {
+		data, err := readPCIDeviceFileFunc(filepath.Join("/sys/bus/pci/devices", bdf, attr))
+		if err != nil {
+			continue
+		}
+		if width := normalizePCIeLinkWidth(string(data)); width != "" {
+			return width
+		}
+	}
+	return ""
+}
+
+func normalizePCIeLinkSpeed(raw string) string {
+	value := strings.TrimSpace(strings.TrimSuffix(raw, "PCIe"))
+	switch {
+	case strings.HasPrefix(value, "2.5"):
+		return "2_5"
+	case strings.HasPrefix(value, "5.0"), value == "5":
+		return "5"
+	case strings.HasPrefix(value, "8.0"), value == "8":
+		return "8"
+	case strings.HasPrefix(value, "16.0"), value == "16":
+		return "16"
+	case strings.HasPrefix(value, "32.0"), value == "32":
+		return "32"
+	case strings.HasPrefix(value, "64.0"), value == "64":
+		return "64"
+	default:
+		return ""
+	}
+}
+
+func normalizePCIeLinkWidth(raw string) string {
+	value := strings.TrimSpace(raw)
+	switch value {
+	case "1", "2", "4", "8", "12", "16", "32":
+		return value
+	default:
+		return ""
+	}
+}
+
+func comparePCIeSpeed(lhs, rhs string) int {
+	return comparePCIeOrderedValue(lhs, rhs, map[string]int{
+		"2_5": 0,
+		"5":   1,
+		"8":   2,
+		"16":  3,
+		"32":  4,
+		"64":  5,
+	})
+}
+
+func comparePCIeWidth(lhs, rhs string) int {
+	return comparePCIeOrderedValue(lhs, rhs, map[string]int{
+		"1":  0,
+		"2":  1,
+		"4":  2,
+		"8":  3,
+		"12": 4,
+		"16": 5,
+		"32": 6,
+	})
+}
+
+func comparePCIeOrderedValue(lhs, rhs string, order map[string]int) int {
+	lhsRank, lhsOK := order[lhs]
+	rhsRank, rhsOK := order[rhs]
+	switch {
+	case lhsOK && rhsOK:
+		return lhsRank - rhsRank
+	case lhsOK:
+		return -1
+	case rhsOK:
+		return 1
+	default:
+		return strings.Compare(lhs, rhs)
+	}
+}
+
+func applyGuestRootPortLinkCharacteristics(domain *api.Domain, rootPort *rootPortInfo, link *pcieLinkCharacteristics) {
+	if domain == nil || rootPort == nil || link == nil || rootPort.qemuID == "" {
+		return
+	}
+
+	if link.speed != "" {
+		upsertQEMUOverrideProperty(domain, rootPort.qemuID, "x-speed", "string", link.speed)
+		removeQEMUSetArg(domain, fmt.Sprintf("device.%s.x-speed", rootPort.qemuID))
+	}
+	if link.width != "" {
+		upsertQEMUOverrideProperty(domain, rootPort.qemuID, "x-width", "string", link.width)
+		removeQEMUSetArg(domain, fmt.Sprintf("device.%s.x-width", rootPort.qemuID))
+	}
+}
+
+func upsertQEMUOverrideProperty(domain *api.Domain, alias, name, propType, value string) {
+	if domain == nil || alias == "" || name == "" {
+		return
+	}
+
+	if domain.Spec.QEMUOverride == nil {
+		domain.Spec.QEMUOverride = &api.QEMUOverride{}
+	}
+
+	for i := range domain.Spec.QEMUOverride.Devices {
+		device := &domain.Spec.QEMUOverride.Devices[i]
+		if device.Alias != alias {
+			continue
+		}
+		for j := range device.Frontend.Properties {
+			prop := &device.Frontend.Properties[j]
+			if prop.Name == name {
+				prop.Type = propType
+				prop.Value = value
+				return
+			}
+		}
+		device.Frontend.Properties = append(device.Frontend.Properties, api.QEMUOverrideProperty{
+			Name:  name,
+			Type:  propType,
+			Value: value,
+		})
+		return
+	}
+
+	domain.Spec.QEMUOverride.Devices = append(domain.Spec.QEMUOverride.Devices, api.QEMUOverrideDevice{
+		Alias: alias,
+		Frontend: api.QEMUOverrideFrontend{
+			Properties: []api.QEMUOverrideProperty{{
+				Name:  name,
+				Type:  propType,
+				Value: value,
+			}},
+		},
+	})
+}
+
+func removeQEMUSetArg(domain *api.Domain, key string) {
+	if domain == nil || domain.Spec.QEMUCmd == nil || len(domain.Spec.QEMUCmd.QEMUArg) == 0 {
+		return
+	}
+
+	prefix := key + "="
+	filtered := make([]api.Arg, 0, len(domain.Spec.QEMUCmd.QEMUArg))
+	for i := 0; i < len(domain.Spec.QEMUCmd.QEMUArg); i++ {
+		if domain.Spec.QEMUCmd.QEMUArg[i].Value == "-set" &&
+			i+1 < len(domain.Spec.QEMUCmd.QEMUArg) &&
+			strings.HasPrefix(domain.Spec.QEMUCmd.QEMUArg[i+1].Value, prefix) {
+			i++
+			continue
+		}
+		filtered = append(filtered, domain.Spec.QEMUCmd.QEMUArg[i])
+	}
+
+	domain.Spec.QEMUCmd.QEMUArg = filtered
+	if len(domain.Spec.QEMUCmd.QEMUArg) == 0 {
+		domain.Spec.QEMUCmd.QEMUArg = nil
+		if len(domain.Spec.QEMUCmd.QEMUEnv) == 0 {
+			domain.Spec.QEMUCmd = nil
+		}
+	}
 }
 
 // applyEGMMemoryDevices discovers EGM character devices on the host and adds

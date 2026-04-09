@@ -210,6 +210,7 @@ type DomainSpec struct {
 	Clock          *Clock          `xml:"clock,omitempty"`
 	Resource       *Resource       `xml:"resource,omitempty"`
 	QEMUCmd        *Commandline    `xml:"qemu:commandline,omitempty"`
+	QEMUOverride   *QEMUOverride   `xml:"override,omitempty"`
 	Metadata       Metadata        `xml:"metadata,omitempty"`
 	Features       *Features       `xml:"features,omitempty"`
 	CPU            CPU             `xml:"cpu"`
@@ -444,6 +445,104 @@ type Env struct {
 
 type Arg struct {
 	Value string `xml:"value,attr"`
+}
+
+type QEMUOverride struct {
+	Devices []QEMUOverrideDevice `xml:"qemu:device,omitempty"`
+}
+
+type QEMUOverrideDevice struct {
+	Alias    string               `xml:"alias,attr"`
+	Frontend QEMUOverrideFrontend `xml:"qemu:frontend"`
+}
+
+type QEMUOverrideFrontend struct {
+	Properties []QEMUOverrideProperty `xml:"qemu:property,omitempty"`
+}
+
+type QEMUOverrideProperty struct {
+	Name  string `xml:"name,attr"`
+	Type  string `xml:"type,attr,omitempty"`
+	Value string `xml:"value,attr,omitempty"`
+}
+
+func (override QEMUOverride) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	start.Name.Local = "qemu:override"
+	if err := e.EncodeToken(start); err != nil {
+		return err
+	}
+
+	for _, device := range override.Devices {
+		deviceStart := xml.StartElement{
+			Name: xml.Name{Local: "qemu:device"},
+			Attr: []xml.Attr{{Name: xml.Name{Local: "alias"}, Value: device.Alias}},
+		}
+		if err := e.EncodeToken(deviceStart); err != nil {
+			return err
+		}
+
+		frontendStart := xml.StartElement{Name: xml.Name{Local: "qemu:frontend"}}
+		if err := e.EncodeToken(frontendStart); err != nil {
+			return err
+		}
+
+		for _, prop := range device.Frontend.Properties {
+			propStart := xml.StartElement{
+				Name: xml.Name{Local: "qemu:property"},
+				Attr: []xml.Attr{
+					{Name: xml.Name{Local: "name"}, Value: prop.Name},
+				},
+			}
+			if prop.Type != "" {
+				propStart.Attr = append(propStart.Attr, xml.Attr{Name: xml.Name{Local: "type"}, Value: prop.Type})
+			}
+			if prop.Value != "" {
+				propStart.Attr = append(propStart.Attr, xml.Attr{Name: xml.Name{Local: "value"}, Value: prop.Value})
+			}
+			if err := e.EncodeToken(propStart); err != nil {
+				return err
+			}
+			if err := e.EncodeToken(propStart.End()); err != nil {
+				return err
+			}
+		}
+
+		if err := e.EncodeToken(frontendStart.End()); err != nil {
+			return err
+		}
+		if err := e.EncodeToken(deviceStart.End()); err != nil {
+			return err
+		}
+	}
+
+	return e.EncodeToken(start.End())
+}
+
+func (override *QEMUOverride) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var qemuOverride struct {
+		Devices []struct {
+			Alias    string `xml:"alias,attr"`
+			Frontend struct {
+				Properties []QEMUOverrideProperty `xml:"property"`
+			} `xml:"frontend"`
+		} `xml:"device"`
+	}
+
+	if err := d.DecodeElement(&qemuOverride, &start); err != nil {
+		return err
+	}
+
+	override.Devices = make([]QEMUOverrideDevice, 0, len(qemuOverride.Devices))
+	for _, device := range qemuOverride.Devices {
+		override.Devices = append(override.Devices, QEMUOverrideDevice{
+			Alias: device.Alias,
+			Frontend: QEMUOverrideFrontend{
+				Properties: append([]QEMUOverrideProperty(nil), device.Frontend.Properties...),
+			},
+		})
+	}
+
+	return nil
 }
 
 type Resource struct {

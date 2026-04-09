@@ -981,6 +981,23 @@ func hasArmSMMUv3QEMUArgs(domain *api.Domain) bool {
 	return false
 }
 
+func hasQEMUOverrideProperty(domain *api.Domain, alias, name, propType, value string) bool {
+	if domain == nil || domain.Spec.QEMUOverride == nil {
+		return false
+	}
+	for _, device := range domain.Spec.QEMUOverride.Devices {
+		if device.Alias != alias {
+			continue
+		}
+		for _, prop := range device.Frontend.Properties {
+			if prop.Name == name && prop.Type == propType && prop.Value == value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsAndVCMDQ(t *testing.T) {
 	defer restoreNUMAHelpers()
 	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
@@ -994,6 +1011,18 @@ func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsAndVCMDQ(t *testing.T) {
 	}
 	getDeviceNumaNodeIntFunc = func(string) (int, error) {
 		return 0, nil
+	}
+	readPCIDeviceFileFunc = func(path string) ([]byte, error) {
+		switch {
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_speed"),
+			strings.HasSuffix(path, "/0000:03:00.0/max_link_speed"):
+			return []byte("32.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_width"),
+			strings.HasSuffix(path, "/0000:03:00.0/max_link_width"):
+			return []byte("16\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
 	}
 
 	vmi := &v1.VirtualMachineInstance{
@@ -1062,6 +1091,244 @@ func TestApplyNUMAHostDeviceTopologyInjectsSMMUv3IOMMUsAndVCMDQ(t *testing.T) {
 	}
 	if hasArmSMMUv3QEMUArgs(domain) {
 		t.Fatalf("did not expect raw arm-smmuv3 qemu args when using libvirt-native smmuv3 iommu entries")
+	}
+	var hasRootPortLinkSpeed bool
+	var hasRootPortLinkWidth bool
+	for _, ctrl := range domain.Spec.Devices.Controllers {
+		if ctrl.Model != "pcie-root-port" || ctrl.Alias == nil {
+			continue
+		}
+		qemuID := api.UserAliasPrefix + ctrl.Alias.GetName()
+		if hasQEMUOverrideProperty(domain, qemuID, "x-speed", "string", "32") {
+			hasRootPortLinkSpeed = true
+		}
+		if hasQEMUOverrideProperty(domain, qemuID, "x-width", "string", "16") {
+			hasRootPortLinkWidth = true
+		}
+	}
+	if !hasRootPortLinkSpeed {
+		t.Fatalf("expected derived per-root-port x-speed qemu override property to be injected")
+	}
+	if !hasRootPortLinkWidth {
+		t.Fatalf("expected derived per-root-port x-width qemu override property to be injected")
+	}
+}
+
+func TestApplyNUMAHostDeviceTopologyDerivesRootPortLinkFromHostPathBottleneck(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) {
+		return 0, nil
+	}
+	readPCIDeviceFileFunc = func(path string) ([]byte, error) {
+		switch {
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_speed"):
+			return []byte("16.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:03:00.0/max_link_speed"):
+			return []byte("32.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_width"):
+			return []byte("8\n"), nil
+		case strings.HasSuffix(path, "/0000:03:00.0/max_link_width"):
+			return []byte("16\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("nic0", "0x0000", "0x03"),
+				},
+			},
+		},
+	}
+
+	assignNUMAMapping(domain, map[int]int{0: 0})
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:03:00.0"})
+
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	var hasBottleneckSpeed bool
+	var hasBottleneckWidth bool
+	for _, ctrl := range domain.Spec.Devices.Controllers {
+		if ctrl.Model != "pcie-root-port" || ctrl.Alias == nil {
+			continue
+		}
+		qemuID := api.UserAliasPrefix + ctrl.Alias.GetName()
+		if hasQEMUOverrideProperty(domain, qemuID, "x-speed", "string", "16") {
+			hasBottleneckSpeed = true
+		}
+		if hasQEMUOverrideProperty(domain, qemuID, "x-width", "string", "8") {
+			hasBottleneckWidth = true
+		}
+	}
+	if !hasBottleneckSpeed {
+		t.Fatalf("expected root port x-speed to follow the host path bottleneck")
+	}
+	if !hasBottleneckWidth {
+		t.Fatalf("expected root port x-width to follow the host path bottleneck")
+	}
+}
+
+func TestReadPCIeLinkCharacteristicsPreferCurrentOverMax(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	readPCIDeviceFileFunc = func(path string) ([]byte, error) {
+		switch {
+		case strings.HasSuffix(path, "/0000:00:01.0/current_link_speed"):
+			return []byte("16.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_speed"):
+			return []byte("32.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/current_link_width"):
+			return []byte("8\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_width"):
+			return []byte("16\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+
+	if got := readPCIeLinkSpeedForBDF("0000:00:01.0"); got != "16" {
+		t.Fatalf("expected current link speed to be preferred, got %q", got)
+	}
+	if got := readPCIeLinkWidthForBDF("0000:00:01.0"); got != "8" {
+		t.Fatalf("expected current link width to be preferred, got %q", got)
+	}
+}
+
+func TestReadPCIeLinkCharacteristicsFallbackToMax(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	readPCIDeviceFileFunc = func(path string) ([]byte, error) {
+		switch {
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_speed"):
+			return []byte("32.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_width"):
+			return []byte("16\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+
+	if got := readPCIeLinkSpeedForBDF("0000:00:01.0"); got != "32" {
+		t.Fatalf("expected max link speed fallback, got %q", got)
+	}
+	if got := readPCIeLinkWidthForBDF("0000:00:01.0"); got != "16" {
+		t.Fatalf("expected max link width fallback, got %q", got)
+	}
+}
+
+func TestApplyNUMAHostDeviceTopologyIgnoresDownstreamSwitchBottlenecksForRootPortModeling(t *testing.T) {
+	defer restoreNUMAHelpers()
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(string) (int, error) {
+		return 0, nil
+	}
+	readPCIDeviceFileFunc = func(path string) ([]byte, error) {
+		switch {
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_speed"),
+			strings.HasSuffix(path, "/0000:01:00.0/max_link_speed"):
+			return []byte("32.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:02:00.0/max_link_speed"),
+			strings.HasSuffix(path, "/0000:02:01.0/max_link_speed"),
+			strings.HasSuffix(path, "/0000:03:00.0/max_link_speed"),
+			strings.HasSuffix(path, "/0000:04:00.0/max_link_speed"):
+			return []byte("16.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "/0000:00:01.0/max_link_width"),
+			strings.HasSuffix(path, "/0000:01:00.0/max_link_width"):
+			return []byte("16\n"), nil
+		case strings.HasSuffix(path, "/0000:02:00.0/max_link_width"),
+			strings.HasSuffix(path, "/0000:02:01.0/max_link_width"),
+			strings.HasSuffix(path, "/0000:03:00.0/max_link_width"),
+			strings.HasSuffix(path, "/0000:04:00.0/max_link_width"):
+			return []byte("8\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x03"),
+					newTestPCIHostDevice("gpu1", "0x0000", "0x04"),
+				},
+			},
+		},
+	}
+
+	assignNUMAMapping(domain, map[int]int{0: 0})
+	stubPCIPath("0000:03:00.0", []string{"0000:00:01.0", "0000:01:00.0", "0000:02:00.0", "0000:03:00.0"})
+	stubPCIPath("0000:04:00.0", []string{"0000:00:01.0", "0000:01:00.0", "0000:02:01.0", "0000:04:00.0"})
+
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	var hasSharedUpstreamSpeed bool
+	var hasSharedUpstreamWidth bool
+	for _, ctrl := range domain.Spec.Devices.Controllers {
+		if ctrl.Model != "pcie-root-port" || ctrl.Alias == nil {
+			continue
+		}
+		qemuID := api.UserAliasPrefix + ctrl.Alias.GetName()
+		if hasQEMUOverrideProperty(domain, qemuID, "x-speed", "string", "32") {
+			hasSharedUpstreamSpeed = true
+		}
+		if hasQEMUOverrideProperty(domain, qemuID, "x-width", "string", "16") {
+			hasSharedUpstreamWidth = true
+		}
+	}
+	if !hasSharedUpstreamSpeed {
+		t.Fatalf("expected root port x-speed to follow the shared upstream link, not slower downstream switch links")
+	}
+	if !hasSharedUpstreamWidth {
+		t.Fatalf("expected root port x-width to follow the shared upstream link, not narrower downstream switch links")
 	}
 }
 
@@ -1871,6 +2138,7 @@ func restoreNUMAHelpers() {
 	isIOMMUFDDeviceAvailableFunc = isIOMMUFDDeviceAvailable
 	discoverEGMDevicesFunc = hardware.DiscoverEGMDevices
 	statEGMDevicePathFunc = os.Stat
+	readPCIDeviceFileFunc = os.ReadFile
 	testPCIHierarchy = map[string][]string{}
 	setDefaultTopologyGrouping()
 }

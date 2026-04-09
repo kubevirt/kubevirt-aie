@@ -532,5 +532,31 @@ var _ = ginkgo.Describe("LaunchSecurity SEV-SNP", func() {
 			Expect(xml.Unmarshal(xmlBytes, &parsed)).To(Succeed())
 			Expect(parsed.LaunchSecurity).To(BeNil())
 		})
+
+		ginkgo.It("should round-trip domain with qemu override properties", func() {
+			domain := NewMinimalDomainSpec("test-domain")
+			domain.QEMUOverride = &QEMUOverride{
+				Devices: []QEMUOverrideDevice{
+					{
+						Alias: "ua-numa-rp-test",
+						Frontend: QEMUOverrideFrontend{
+							Properties: []QEMUOverrideProperty{
+								{Name: "x-speed", Type: "unsigned", Value: "32"},
+								{Name: "x-width", Type: "unsigned", Value: "16"},
+							},
+						},
+					},
+				},
+			}
+
+			xmlBytes, err := xml.Marshal(domain)
+			Expect(err).ToNot(HaveOccurred())
+
+			var parsed DomainSpec
+			Expect(xml.Unmarshal(xmlBytes, &parsed)).To(Succeed())
+
+			Expect(parsed.QEMUOverride).ToNot(BeNil())
+			Expect(parsed.QEMUOverride).To(Equal(domain.QEMUOverride))
+		})
 	})
 })
