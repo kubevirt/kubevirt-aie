@@ -72,6 +72,12 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 		}
 	}
 
+	createIOMMUPCIDevice := func(alias, bus string) api.HostDevice {
+		dev := createPCIDevice(alias, bus)
+		dev.ACPI = &api.ACPIHostDev{NodeSet: "tofill"}
+		return dev
+	}
+
 	createNonPCIDevice := func(deviceType string) api.HostDevice {
 		return api.HostDevice{
 			Type: deviceType,
@@ -94,12 +100,25 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		// Create test PCI devices with NUMA nodes
+		//
+		// Devices on NUMA nodes 0 and 1 (CPU nodes):
+		//   0000:01:00.0 -> NUMA 0 (has CPUs 0-3)
+		//   0000:02:00.0 -> NUMA 1 (has CPUs 4-7)
+		//   0000:03:00.0 -> NUMA 0
+		//   0000:04:00.0 -> NUMA 1
+		//   0000:05:00.0 -> NUMA 0
+		//
+		// Devices on GPU NUMA nodes (no CPUs, modelling GB200 topology):
+		//   0000:06:00.0 -> NUMA 2 (GPU HBM node, no CPUs)
+		//   0000:07:00.0 -> NUMA 10 (GPU HBM node, no CPUs)
 		testDevices := map[string]string{
 			"0000:01:00.0": "0",
 			"0000:02:00.0": "1",
 			"0000:03:00.0": "0",
 			"0000:04:00.0": "1",
 			"0000:05:00.0": "0",
+			"0000:06:00.0": "2",
+			"0000:07:00.0": "10",
 		}
 
 		for pciAddr, numaNode := range testDevices {
@@ -113,7 +132,14 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 		}
 
 		// Create NUMA node directories
-		for numaID, cpuList := range map[string]string{"0": "0-3", "1": "4-7"} {
+		// Nodes 0 and 1 have CPUs (Grace CPU sockets)
+		// Nodes 2 and 10 have no CPUs (GPU HBM nodes on a GB200)
+		for numaID, cpuList := range map[string]string{
+			"0":  "0-3",
+			"1":  "4-7",
+			"2":  "",
+			"10": "",
+		} {
 			numaNodePath := filepath.Join(fakeNodeBasePath, "node"+numaID)
 			err = os.MkdirAll(numaNodePath, 0o755)
 			Expect(err).ToNot(HaveOccurred())
@@ -222,6 +248,33 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 				expectedDevices: 2,
 				description:     "should accept all valid PCI devices with NUMA affinity",
 			}),
+			Entry("accepts cross-NUMA device by creating CPU-less NUMA cell", addDevicesTestCase{
+				name: "device on NUMA node without vCPUs (cross-NUMA)",
+				devices: []api.HostDevice{
+					createPCIDevice("gpu1", "0x02"), // NUMA 1, no vCPUs pinned there
+				},
+				numaCells: []api.NUMACell{{ID: "0", CPUs: "0-1"}},
+				vcpuPins: []api.CPUTuneVCPUPin{
+					{VCPU: 0, CPUSet: "0"},
+					{VCPU: 1, CPUSet: "1"},
+				},
+				expectedDevices: 1,
+				description:     "should accept cross-NUMA device by creating a CPU-less guest NUMA cell",
+			}),
+			Entry("accepts both co-located and cross-NUMA devices", addDevicesTestCase{
+				name: "mixed NUMA alignment",
+				devices: []api.HostDevice{
+					createPCIDevice("gpu_numa0", "0x01"), // NUMA 0, vCPUs present
+					createPCIDevice("gpu_numa1", "0x02"), // NUMA 1, no vCPUs
+				},
+				numaCells: []api.NUMACell{{ID: "0", CPUs: "0-1"}},
+				vcpuPins: []api.CPUTuneVCPUPin{
+					{VCPU: 0, CPUSet: "0"},
+					{VCPU: 1, CPUSet: "1"},
+				},
+				expectedDevices: 2,
+				description:     "should accept both co-located and cross-NUMA devices",
+			}),
 		)
 
 		DescribeTable("PlaceNumaAlignedDevices",
@@ -312,6 +365,33 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 				devices:             []api.HostDevice{createPCIDevice("device1", "0x01")},
 				expectedControllers: 0,
 			}),
+			Entry("places cross-NUMA device with CPU-less NUMA cell", devicePlacementTestCase{
+				name: "cross-NUMA: device on NUMA 1, vCPUs only on NUMA 0",
+				numaCells: []api.NUMACell{{ID: "0", CPUs: "0-1"}},
+				vcpuPins: []api.CPUTuneVCPUPin{
+					{VCPU: 0, CPUSet: "0"},
+					{VCPU: 1, CPUSet: "1"},
+				},
+				devices:               []api.HostDevice{createPCIDevice("gpu1", "0x02")},
+				expectedControllers:   2,
+				expectedExpanderBuses: 1,
+				expectedRootPorts:     1,
+			}),
+			Entry("places both co-located and cross-NUMA devices", devicePlacementTestCase{
+				name: "mixed: one device co-located, one cross-NUMA",
+				numaCells: []api.NUMACell{{ID: "0", CPUs: "0-1"}},
+				vcpuPins: []api.CPUTuneVCPUPin{
+					{VCPU: 0, CPUSet: "0"},
+					{VCPU: 1, CPUSet: "1"},
+				},
+				devices: []api.HostDevice{
+					createPCIDevice("gpu_numa0", "0x01"), // NUMA 0, vCPUs present
+					createPCIDevice("gpu_numa1", "0x02"), // NUMA 1, no vCPUs
+				},
+				expectedControllers:   4,
+				expectedExpanderBuses: 2,
+				expectedRootPorts:     2,
+			}),
 		)
 	})
 
@@ -391,6 +471,73 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 				Expect(device.Address.Bus).ToNot(BeEmpty())
 				Expect(device.Address.Slot).To(Equal("0x00"))
 			}
+		})
+
+		It("should place cross-NUMA device under expander bus with CPU-less NUMA cell", func() {
+			// Simulate a topology like NVIDIA GB200 where GPUs are on
+			// separate NUMA nodes (2, 10) from the CPUs (NUMA 0, 1).
+			// See: https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/system.html
+			//
+			// On a 2-superchip GB200:
+			//   NUMA 0: Grace CPU #1 (CPUs 0-71, ~490 GB LPDDR5X)
+			//   NUMA 1: Grace CPU #2 (CPUs 72-143, ~490 GB LPDDR5X)
+			//   NUMA 2: Blackwell GPU #1 (no CPUs, ~188 GB HBM)
+			//   NUMA 10: Blackwell GPU #2 (no CPUs, ~188 GB HBM)
+			domainSpec = createDomainSpecWithNUMA(
+				[]api.NUMACell{
+					{ID: "0", CPUs: "0-1"},
+					{ID: "1", CPUs: "2-3"},
+				},
+				[]api.CPUTuneVCPUPin{
+					{VCPU: 0, CPUSet: "0"},
+					{VCPU: 1, CPUSet: "1"},
+					{VCPU: 2, CPUSet: "4"},
+					{VCPU: 3, CPUSet: "5"},
+				},
+			)
+
+			gpu1 := createIOMMUPCIDevice("gpu_numa2", "0x06")  // NUMA 2, no CPUs (GPU HBM node)
+			gpu2 := createIOMMUPCIDevice("gpu_numa10", "0x07") // NUMA 10, no CPUs (GPU HBM node)
+
+			domainSpec.Devices.HostDevices = []api.HostDevice{gpu1, gpu2}
+
+			err := PlacePCIDevicesWithNUMAAlignment(domainSpec, iommuPCI)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Both GPUs should be placed under expander buses
+			for i, device := range domainSpec.Devices.HostDevices {
+				Expect(device.Address).ToNot(BeNil(), "device %d should have an address assigned", i)
+				Expect(device.Address.Type).To(Equal(api.AddressPCI))
+				Expect(device.Address.Slot).To(Equal("0x00"))
+			}
+
+			// Verify two expander buses were created (one per GPU NUMA node)
+			expanderBuses := make(map[uint32]*api.Controller)
+			for i := range domainSpec.Devices.Controllers {
+				ctrl := &domainSpec.Devices.Controllers[i]
+				if ctrl.Model == api.ControllerModelPCIeExpanderBus {
+					Expect(ctrl.Target).ToNot(BeNil())
+					Expect(ctrl.Target.NUMANode).ToNot(BeNil())
+					expanderBuses[*ctrl.Target.NUMANode] = ctrl
+				}
+			}
+			Expect(expanderBuses).To(HaveLen(2), "expected 2 expander buses (one per GPU)")
+
+			// Each GPU gets its own SMMUv3 since each is on its own NUMA node
+			Expect(domainSpec.Devices.IOMMU).To(HaveLen(2), "each GPU should have its own smmuv3")
+
+			// Verify CPU-less NUMA cells were created for the GPU NUMA nodes
+			Expect(domainSpec.CPU.NUMA).ToNot(BeNil())
+			Expect(domainSpec.CPU.NUMA.Cells).To(HaveLen(4), "expected 4 NUMA cells (2 CPU + 2 GPU)")
+
+			for _, cell := range domainSpec.CPU.NUMA.Cells[2:] {
+				Expect(cell.CPUs).To(Equal(""), "GPU NUMA cell should have no CPUs")
+			}
+
+			// Verify the two GPU devices are on different expander buses
+			Expect(domainSpec.Devices.HostDevices[0].Address.Bus).ToNot(
+				Equal(domainSpec.Devices.HostDevices[1].Address.Bus),
+				"GPUs should be on separate expander buses")
 		})
 	})
 })
