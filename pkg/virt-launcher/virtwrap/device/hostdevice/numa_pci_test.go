@@ -23,6 +23,54 @@ func mustApplyNUMAHostDeviceTopology(t *testing.T, vmi *v1.VirtualMachineInstanc
 	}
 }
 
+func mustPrepareGraceGuestNUMATopology(t *testing.T, vmi *v1.VirtualMachineInstance, domain *api.Domain) {
+	t.Helper()
+	if err := PrepareGraceGuestNUMATopology(vmi, domain); err != nil {
+		t.Fatalf("PrepareGraceGuestNUMATopology returned error: %v", err)
+	}
+}
+
+func mustNUMACellByID(t *testing.T, domain *api.Domain, id string) api.NUMACell {
+	t.Helper()
+	if domain == nil || domain.Spec.CPU.NUMA == nil {
+		t.Fatalf("domain NUMA topology is nil")
+	}
+	for _, cell := range domain.Spec.CPU.NUMA.Cells {
+		if cell.ID == id {
+			return cell
+		}
+	}
+	t.Fatalf("NUMA cell %s not found", id)
+	return api.NUMACell{}
+}
+
+func mustNUMADistanceValue(t *testing.T, cell api.NUMACell, dst string) uint64 {
+	t.Helper()
+	if cell.Distances == nil {
+		t.Fatalf("NUMA cell %s has no distances", cell.ID)
+	}
+	for _, sibling := range cell.Distances.Siblings {
+		if sibling.ID == dst {
+			return sibling.Value
+		}
+	}
+	t.Fatalf("NUMA cell %s has no sibling distance for %s", cell.ID, dst)
+	return 0
+}
+
+func mustHostDeviceNodeSets(t *testing.T, domain *api.Domain) []string {
+	t.Helper()
+	nodeSets := make([]string, 0, len(domain.Spec.Devices.HostDevices))
+	for i := range domain.Spec.Devices.HostDevices {
+		dev := domain.Spec.Devices.HostDevices[i]
+		if dev.ACPI == nil {
+			t.Fatalf("host device %d has no ACPI nodeset", i)
+		}
+		nodeSets = append(nodeSets, dev.ACPI.NodeSet)
+	}
+	return nodeSets
+}
+
 func TestNormalizeHotplugRootPortAlias(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
@@ -1392,6 +1440,28 @@ func TestApplyNUMAHostDeviceTopologyInjectsArm64GraceGINodeSetsForLargeMMIOGPUs(
 			t.Fatalf("expected guest NUMA cell %d to exist after GI allocation", id)
 		}
 	}
+
+	cell0 := mustNUMACellByID(t, domain, "0")
+	if got := mustNUMADistanceValue(t, cell0, "1"); got != graceNUMADistanceRemoteNode {
+		t.Fatalf("expected cell 0 -> 1 distance %d, got %d", graceNUMADistanceRemoteNode, got)
+	}
+	if got := mustNUMADistanceValue(t, cell0, "2"); got != graceNUMADistanceLocalToGPU {
+		t.Fatalf("expected cell 0 -> 2 distance %d, got %d", graceNUMADistanceLocalToGPU, got)
+	}
+	if got := mustNUMADistanceValue(t, cell0, "10"); got != graceNUMADistanceRemoteToGPU {
+		t.Fatalf("expected cell 0 -> 10 distance %d, got %d", graceNUMADistanceRemoteToGPU, got)
+	}
+
+	cell2 := mustNUMACellByID(t, domain, "2")
+	if got := mustNUMADistanceValue(t, cell2, "0"); got != graceNUMADistanceLocalToGPU {
+		t.Fatalf("expected cell 2 -> 0 distance %d, got %d", graceNUMADistanceLocalToGPU, got)
+	}
+	if got := mustNUMADistanceValue(t, cell2, "3"); got != graceNUMADistanceSameGPUGroup {
+		t.Fatalf("expected cell 2 -> 3 distance %d, got %d", graceNUMADistanceSameGPUGroup, got)
+	}
+	if got := mustNUMADistanceValue(t, cell2, "10"); got != graceNUMADistanceRemoteNode {
+		t.Fatalf("expected cell 2 -> 10 distance %d, got %d", graceNUMADistanceRemoteNode, got)
+	}
 }
 
 func TestApplyNUMAHostDeviceTopologyInjectsIOMMUFDOnlyForLargeMMIOGraceDevices(t *testing.T) {
@@ -1598,6 +1668,10 @@ func TestApplyNUMAHostDeviceTopologyAssignsUniqueGINodeSetsPerLargeMMIOGPU(t *te
 		}
 		seenNodeSets[dev.ACPI.NodeSet] = struct{}{}
 	}
+	expectedNodeSetOrder := []string{"2-9", "10-17", "18-25", "26-33"}
+	if got := mustHostDeviceNodeSets(t, domain); !reflect.DeepEqual(got, expectedNodeSetOrder) {
+		t.Fatalf("expected host devices to be ordered by GI nodeset %v, got %v", expectedNodeSetOrder, got)
+	}
 
 	for id := 0; id <= 33; id++ {
 		idStr := strconv.Itoa(id)
@@ -1610,6 +1684,90 @@ func TestApplyNUMAHostDeviceTopologyAssignsUniqueGINodeSetsPerLargeMMIOGPU(t *te
 		}
 		if !found {
 			t.Fatalf("expected guest NUMA cell %d to exist after GI allocation", id)
+		}
+	}
+}
+
+func TestPrepareGraceGuestNUMATopologyKeepsStableGINodeSetsWhenAppliedBeforeNUMAHostDeviceTopology(t *testing.T) {
+	defer restoreNUMAHelpers()
+	isIOMMUFDDeviceAvailableFunc = func() bool { return true }
+
+	formatPCIAddressFunc = func(addr *api.Address) (string, error) {
+		domain := strings.TrimPrefix(addr.Domain, "0x")
+		bus := strings.TrimPrefix(addr.Bus, "0x")
+		slot := strings.TrimPrefix(addr.Slot, "0x")
+		function := strings.TrimPrefix(addr.Function, "0x")
+		return fmt.Sprintf("%s:%s:%s.%s", domain, bus, slot, function), nil
+	}
+	getDeviceNumaNodeIntFunc = func(bdf string) (int, error) {
+		switch bdf {
+		case "0000:08:00.0", "0000:09:00.0":
+			return 0, nil
+		case "0000:18:00.0", "0000:19:00.0":
+			return 1, nil
+		default:
+			return -1, fmt.Errorf("unexpected bdf %s", bdf)
+		}
+	}
+	getDevicePCITotalMMIOSizeFunc = func(string) (uint64, error) {
+		return largeMMIOPXBIsolationThreshold, nil
+	}
+
+	vmi := &v1.VirtualMachineInstance{
+		Spec: v1.VirtualMachineInstanceSpec{
+			Architecture: "arm64",
+			Domain: v1.DomainSpec{
+				CPU: &v1.CPU{
+					NUMA: &v1.NUMA{
+						GuestMappingPassthrough: &v1.NUMAGuestMappingPassthrough{},
+					},
+				},
+			},
+		},
+	}
+	vmi.Annotations = map[string]string{
+		v1.GraceVirtualizationAnnotation: `{"smmuv3":true}`,
+	}
+
+	domain := &api.Domain{
+		Spec: api.DomainSpec{
+			CPU: api.CPU{
+				NUMA: &api.NUMA{Cells: []api.NUMACell{
+					{ID: "0", CPUs: "0-59", Memory: 1, Unit: "GiB"},
+					{ID: "1", CPUs: "60-119", Memory: 1, Unit: "GiB"},
+				}},
+			},
+			Devices: api.Devices{
+				Controllers: []api.Controller{
+					{Type: "pci", Index: "0", Model: "pcie-root"},
+				},
+				HostDevices: []api.HostDevice{
+					newTestPCIHostDevice("gpu0", "0x0000", "0x19"),
+					newTestPCIHostDevice("gpu1", "0x0000", "0x08"),
+					newTestPCIHostDevice("gpu2", "0x0000", "0x18"),
+					newTestPCIHostDevice("gpu3", "0x0000", "0x09"),
+				},
+			},
+		},
+	}
+
+	stubPCIPath("0000:08:00.0", []string{"0000:00:08.0", "0000:08:00.0"})
+	stubPCIPath("0000:09:00.0", []string{"0000:00:09.0", "0000:09:00.0"})
+	stubPCIPath("0000:18:00.0", []string{"0000:00:18.0", "0000:18:00.0"})
+	stubPCIPath("0000:19:00.0", []string{"0000:00:19.0", "0000:19:00.0"})
+
+	mustPrepareGraceGuestNUMATopology(t, vmi, domain)
+	mustApplyNUMAHostDeviceTopology(t, vmi, domain)
+
+	expectedNodeSetOrder := []string{"2-9", "10-17", "18-25", "26-33"}
+	if got := mustHostDeviceNodeSets(t, domain); !reflect.DeepEqual(got, expectedNodeSetOrder) {
+		t.Fatalf("expected host devices to keep stable GI nodeset order %v, got %v", expectedNodeSetOrder, got)
+	}
+
+	for id := 0; id <= 33; id++ {
+		cell := mustNUMACellByID(t, domain, strconv.Itoa(id))
+		if id >= 2 && id <= 33 && (cell.Memory != 0 || cell.Unit != "KiB") {
+			t.Fatalf("expected prepared GI NUMA cell %d to stay zero-memory KiB, got memory=%d unit=%q", id, cell.Memory, cell.Unit)
 		}
 	}
 }
@@ -4547,6 +4705,28 @@ func TestApplyEGMMemoryDevicesMultiSocket(t *testing.T) {
 	}
 	if aliasCount != 4 {
 		t.Errorf("expected 4 GPU hostdevs with EGM aliases, got %d", aliasCount)
+	}
+
+	cell0 := mustNUMACellByID(t, domain, "0")
+	if got := mustNUMADistanceValue(t, cell0, "1"); got != graceNUMADistanceRemoteNode {
+		t.Fatalf("expected cell 0 -> 1 distance %d, got %d", graceNUMADistanceRemoteNode, got)
+	}
+	if got := mustNUMADistanceValue(t, cell0, "2"); got != graceNUMADistanceLocalToGPU {
+		t.Fatalf("expected cell 0 -> 2 distance %d, got %d", graceNUMADistanceLocalToGPU, got)
+	}
+	if got := mustNUMADistanceValue(t, cell0, "18"); got != graceNUMADistanceRemoteToGPU {
+		t.Fatalf("expected cell 0 -> 18 distance %d, got %d", graceNUMADistanceRemoteToGPU, got)
+	}
+
+	cell2 := mustNUMACellByID(t, domain, "2")
+	if got := mustNUMADistanceValue(t, cell2, "9"); got != graceNUMADistanceSameGPUGroup {
+		t.Fatalf("expected cell 2 -> 9 distance %d, got %d", graceNUMADistanceSameGPUGroup, got)
+	}
+	if got := mustNUMADistanceValue(t, cell2, "10"); got != graceNUMADistanceRemoteNode {
+		t.Fatalf("expected cell 2 -> 10 distance %d, got %d", graceNUMADistanceRemoteNode, got)
+	}
+	if got := mustNUMADistanceValue(t, cell2, "0"); got != graceNUMADistanceLocalToGPU {
+		t.Fatalf("expected cell 2 -> 0 distance %d, got %d", graceNUMADistanceLocalToGPU, got)
 	}
 }
 

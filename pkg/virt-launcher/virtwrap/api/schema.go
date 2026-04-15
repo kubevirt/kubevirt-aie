@@ -285,12 +285,22 @@ type NUMA struct {
 	Cells []NUMACell `xml:"cell"`
 }
 
+type NUMACellDistances struct {
+	Siblings []NUMACellSibling `xml:"sibling"`
+}
+
+type NUMACellSibling struct {
+	ID    string `xml:"id,attr"`
+	Value uint64 `xml:"value,attr"`
+}
+
 type NUMACell struct {
-	ID           string `xml:"id,attr"`
-	CPUs         string `xml:"cpus,attr,omitempty"`
-	Memory       uint64 `xml:"memory,attr"`
-	Unit         string `xml:"unit,attr,omitempty"`
-	MemoryAccess string `xml:"memAccess,attr,omitempty"`
+	ID           string             `xml:"id,attr"`
+	CPUs         string             `xml:"cpus,attr,omitempty"`
+	Memory       uint64             `xml:"memory,attr"`
+	Unit         string             `xml:"unit,attr,omitempty"`
+	MemoryAccess string             `xml:"memAccess,attr,omitempty"`
+	Distances    *NUMACellDistances `xml:"distances,omitempty"`
 }
 
 type CPUFeature struct {
