@@ -47,7 +47,7 @@ func HandleIOMMU(domain *api.DomainSpec, iommu *iommupci.IommuPCI) {
 		return
 	}
 	handleFakeNumaNodes(domain)
-
+	applyNUMADistances(domain)
 }
 
 // handleFakeNumaNodes creates fake NUMA nodes for host devices that require them.
