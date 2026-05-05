@@ -10,6 +10,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/pointer:go_default_library",
+        "//pkg/util/hardware:go_default_library",
         "//pkg/virt-launcher/virtwrap/api:go_default_library",
         "//pkg/virt-launcher/virtwrap/iommu-pci:go_default_library",
         "//staging/src/kubevirt.io/client-go/log:go_default_library",
