@@ -72,6 +72,12 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 		}
 	}
 
+	createIOMMUPCIDevice := func(alias, bus string) api.HostDevice {
+		dev := createPCIDevice(alias, bus)
+		dev.ACPI = &api.ACPIHostDev{NodeSet: "tofill"}
+		return dev
+	}
+
 	createNonPCIDevice := func(deviceType string) api.HostDevice {
 		return api.HostDevice{
 			Type: deviceType,
@@ -312,7 +318,129 @@ var _ = Describe("PCIe Expander Bus Assigner", func() {
 				devices:             []api.HostDevice{createPCIDevice("device1", "0x01")},
 				expectedControllers: 0,
 			}),
+			Entry("places single IOMMU device with dedicated expander bus", devicePlacementTestCase{
+				name:                  "single IOMMU device",
+				devices:               []api.HostDevice{createIOMMUPCIDevice("gpu1", "0x01")},
+				expectedControllers:   2,
+				expectedExpanderBuses: 1,
+				expectedRootPorts:     1,
+			}),
+			Entry("places multiple IOMMU devices on same NUMA node with separate expander buses", devicePlacementTestCase{
+				name: "multiple IOMMU devices same NUMA",
+				devices: []api.HostDevice{
+					createIOMMUPCIDevice("gpu1", "0x01"),
+					createIOMMUPCIDevice("gpu2", "0x03"),
+				},
+				expectedControllers:   4,
+				expectedExpanderBuses: 2,
+				expectedRootPorts:     2,
+			}),
+			Entry("places IOMMU devices on different NUMA nodes with separate expander buses", devicePlacementTestCase{
+				name: "IOMMU devices on different NUMA nodes",
+				devices: []api.HostDevice{
+					createIOMMUPCIDevice("gpu_numa0", "0x01"),
+					createIOMMUPCIDevice("gpu_numa1", "0x02"),
+				},
+				expectedControllers:   4,
+				expectedExpanderBuses: 2,
+				expectedRootPorts:     2,
+			}),
 		)
+	})
+
+	Describe("IOMMU device topology isolation", func() {
+		var (
+			domainSpec *api.DomainSpec
+			iommuPCI   *iommupci.IommuPCI
+		)
+
+		BeforeEach(func() {
+			domainSpec = createDomainSpecWithNUMA(
+				[]api.NUMACell{{ID: "0", CPUs: "0-1"}, {ID: "1", CPUs: "2-3"}},
+				[]api.CPUTuneVCPUPin{{VCPU: 0, CPUSet: "0"}, {VCPU: 2, CPUSet: "4"}},
+			)
+			iommuPCI = iommupci.NewIommuPCI(runtime.GOARCH)
+		})
+
+		It("should create separate smmuv3 IOMMU devices for each GPU on the same NUMA node", func() {
+			domainSpec.Devices.HostDevices = []api.HostDevice{
+				createIOMMUPCIDevice("gpu1", "0x01"),
+				createIOMMUPCIDevice("gpu2", "0x03"),
+			}
+
+			err := PlacePCIDevicesWithNUMAAlignment(domainSpec, iommuPCI)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(domainSpec.Devices.IOMMU).To(HaveLen(2), "each GPU should have its own smmuv3")
+			Expect(domainSpec.Devices.IOMMU[0].Model).To(Equal("smmuv3"))
+			Expect(domainSpec.Devices.IOMMU[1].Model).To(Equal("smmuv3"))
+
+			Expect(domainSpec.Devices.IOMMU[0].Driver.PciBus).ToNot(Equal(domainSpec.Devices.IOMMU[1].Driver.PciBus),
+				"each smmuv3 should reference a different expander bus")
+		})
+
+		It("should assign non-overlapping bus numbers to per-device expander buses", func() {
+			domainSpec.Devices.HostDevices = []api.HostDevice{
+				createIOMMUPCIDevice("gpu1", "0x01"),
+				createIOMMUPCIDevice("gpu2", "0x03"),
+			}
+
+			err := PlacePCIDevicesWithNUMAAlignment(domainSpec, iommuPCI)
+			Expect(err).ToNot(HaveOccurred())
+
+			busNumbers := map[uint32]bool{}
+			for _, controller := range domainSpec.Devices.Controllers {
+				if controller.Model == api.ControllerModelPCIeExpanderBus {
+					Expect(controller.Target).ToNot(BeNil())
+					Expect(controller.Target.BusNr).ToNot(BeNil())
+					busNr := *controller.Target.BusNr
+					Expect(busNumbers[busNr]).To(BeFalse(), "bus number %d assigned twice", busNr)
+					busNumbers[busNr] = true
+				}
+			}
+			Expect(busNumbers).To(HaveLen(2))
+		})
+
+		It("should use shared per-NUMA expander bus when only one IOMMU device on a NUMA node", func() {
+			domainSpec.Devices.HostDevices = []api.HostDevice{
+				createIOMMUPCIDevice("gpu1", "0x01"),
+				createPCIDevice("nic1", "0x03"),
+			}
+
+			err := PlacePCIDevicesWithNUMAAlignment(domainSpec, iommuPCI)
+			Expect(err).ToNot(HaveOccurred())
+
+			expanderBuses := 0
+			for _, controller := range domainSpec.Devices.Controllers {
+				if controller.Model == api.ControllerModelPCIeExpanderBus {
+					expanderBuses++
+				}
+			}
+			Expect(expanderBuses).To(Equal(1), "single IOMMU device should share the per-NUMA expander bus")
+
+			Expect(domainSpec.Devices.IOMMU).To(HaveLen(1), "single IOMMU device should still get an smmuv3")
+			Expect(domainSpec.Devices.IOMMU[0].Model).To(Equal("smmuv3"))
+		})
+
+		It("should assign each GPU device to its own root port on separate expander buses", func() {
+			domainSpec.Devices.HostDevices = []api.HostDevice{
+				createIOMMUPCIDevice("gpu1", "0x01"),
+				createIOMMUPCIDevice("gpu2", "0x03"),
+			}
+
+			err := PlacePCIDevicesWithNUMAAlignment(domainSpec, iommuPCI)
+			Expect(err).ToNot(HaveOccurred())
+
+			deviceBuses := map[string]bool{}
+			for _, device := range domainSpec.Devices.HostDevices {
+				Expect(device.Address).ToNot(BeNil())
+				Expect(device.Address.Bus).ToNot(BeEmpty())
+				Expect(deviceBuses[device.Address.Bus]).To(BeFalse(),
+					"bus %s used by multiple devices", device.Address.Bus)
+				deviceBuses[device.Address.Bus] = true
+			}
+			Expect(deviceBuses).To(HaveLen(2))
+		})
 	})
 
 	Describe("PlacePCIDevicesWithNUMAAlignment", func() {
