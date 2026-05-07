@@ -1,0 +1,21 @@
+# Example custom RPM repository definition for NVIDIA Grace (aarch64).
+#
+# Usage:
+#   make CUSTOM_REPO=rpm/nvidia-repo.yaml.example \
+#        ARCH_OVERRIDES=rpm/arch-overrides-nvidia-grace.sh.example \
+#        SINGLE_ARCH=aarch64 \
+#        rpm-deps
+#
+# Replace the baseurl values with your actual RPM repository mirrors.
+
+repositories:
+- arch: aarch64
+  baseurl: https://example.com/rpms/libvirt/11.9.0-nvidia4/
+  name: custom-libvirt-aarch64
+  gpgcheck: 0
+  repo_gpgcheck: 0
+- arch: aarch64
+  baseurl: https://example.com/rpms/qemu/10.1.0-nvidia5/
+  name: custom-qemu-aarch64
+  gpgcheck: 0
+  repo_gpgcheck: 0

@@ -1,0 +1,18 @@
+# Per-arch RPM version overrides for NVIDIA Grace (aarch64).
+#
+# Source this file via ARCH_OVERRIDES or copy the variable exports into your
+# CI environment.
+#
+# Usage:
+#   make ARCH_OVERRIDES=rpm/arch-overrides-nvidia-grace.sh.example \
+#        CUSTOM_REPO=rpm/nvidia-repo.yaml.example \
+#        SINGLE_ARCH=aarch64 \
+#        rpm-deps
+
+# libvirt build with NVIDIA Grace hardware-enablement patches.
+LIBVIRT_VERSION_AARCH64="0:11.9.0+nvidia4-1.el9"
+
+# QEMU build with NVIDIA Grace hardware-enablement patches. The RPMs are
+# expected to use the standard split package layout:
+# qemu-img, qemu-kvm-core, qemu-kvm-device-*, and qemu-pr-helper.
+QEMU_VERSION_AARCH64="17:10.1.0+nvidia5-1.el9"
