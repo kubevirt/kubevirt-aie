@@ -1,0 +1,38 @@
+--- a/oci/private/push.bzl
++++ b/oci/private/push.bzl
+@@ -142,14 +142,6 @@
+-def _transition_to_target_impl(settings, _attr):
+-    return {
+-        # String conversion is needed to prevent a crash with Bazel 6.x.
+-        "//command_line_option:extra_execution_platforms": [
+-            str(platform)
+-            for platform in settings["//command_line_option:platforms"]
+-        ],
+-    }
+-
+-_transition_to_target = transition(
+-    implementation = _transition_to_target_impl,
+-    inputs = ["//command_line_option:platforms"],
+-    outputs = ["//command_line_option:extra_execution_platforms"],
+-)
++#
++# KubeVirt builds multi-arch images (e.g. linux/arm64) on an amd64 builder, and
++# then runs the push action locally. The pusher (and its helper tools like jq/crane)
++# must therefore be built for the *execution* platform, not the target image platform.
++#
++# Use exec-configured tools instead.
+@@ -183,3 +183,0 @@
+-    "_allowlist_function_transition": attr.label(
+-        default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+-    ),
+@@ -187 +184 @@
+-        cfg = _transition_to_target,
++        cfg = "exec",
+@@ -196 +193 @@
+-        cfg = _transition_to_target,
++        cfg = "exec",
+@@ -205,2 +202,2 @@
+-    crane = ctx.attr._crane[0][platform_common.ToolchainInfo]
+-    jq = ctx.attr._jq[0][platform_common.ToolchainInfo]
++    crane = ctx.attr._crane[platform_common.ToolchainInfo]
++    jq = ctx.attr._jq[platform_common.ToolchainInfo]

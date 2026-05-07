@@ -23,6 +23,10 @@ http_archive(
 
 http_archive(
     name = "rules_oci",
+    patch_args = ["-p1"],
+    patches = [
+        "//hack/patches:rules_oci-2.0.1-oci_push-use-exec-tools.patch",
+    ],
     sha256 = "acbf8f40e062f707f8754e914dcb0013803c6e5e3679d3e05b571a9f5c7e0b43",
     strip_prefix = "rules_oci-2.0.1",
     urls = [
