@@ -1,149 +1,167 @@
-# KubeVirt
+# NVIDIA DSX Virtualization
 
-<p align="center">
-<img src="https://github.com/kubevirt/community/blob/main/logo/KubeVirt_icon.png" width="100">
-</p>
+This branch contains the open-sourced KubeVirt enablement used by the NVIDIA DSX Virtualization Reference Architecture for Grace-Blackwell systems. It is based on upstream KubeVirt `release-1.7` and carries experimental ARM64 hardware enablement for large GPU passthrough virtual machines on NVIDIA Grace platforms. The goal of the effort is to let KubeVirt turn a Grace-Blackwell compute tray into a dedicated VM isolation boundary for AI workloads on Kubernetes.
 
+## Scope
 
-<div align="center">
-    
-  [![Build Status](https://prow.ci.kubevirt.io/badge.svg?jobs=push-kubevirt-main)](https://prow.ci.kubevirt.io/?job=push-kubevirt-main)
-  [![Go Report Card](https://goreportcard.com/badge/github.com/kubevirt/kubevirt)](https://goreportcard.com/report/github.com/kubevirt/kubevirt)
-  [![Licensed under Apache License version 2.0](https://img.shields.io/github/license/kubevirt/kubevirt.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-  [![Coverage Status](https://img.shields.io/coveralls/kubevirt/kubevirt/main.svg)](https://coveralls.io/github/kubevirt/kubevirt?branch=main)
-  [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3203/badge)](https://bestpractices.coreinfrastructure.org/projects/3203)
-  [![Visit our Slack channel](https://img.shields.io/badge/slack-@kubernetes/kubevirt--dev-40abb8.svg?logo=slack)](https://kubernetes.slack.com/?redir=%2Farchives%2FC0163DT0R8X)
-  [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git.svg?type=shield)](https://app.fossa.com/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git?ref=badge_shield)
-  [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=kubevirt_kubevirt&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=kubevirt_kubevirt)
-    
-</div>
+The branch is intended for tech preview, development, and reference integration. It is not a generic upstream KubeVirt release. It assumes an ARM64 Grace-Blackwell host prepared for PCI passthrough, SMMUv3, IOMMUFD, optional vCMDQ acceleration, and optional EGM-backed guest memory. The Grace host kernel, Grace-VFIO-driver, container runtime and Kubernetes configuration are out of scope.
 
+The implementation focuses on compute tray-size VMs, where a VM consumes the full set of GPUs and EGM devices exposed by the host/device plugin policy. EGM-backed VMs require the guest memory and assigned devices to match the EGM topology selected by the platform integration. Smaller partial-passthrough configurations are possible for non-EGM VMs.
 
+## Relationship to KubeVirt AIE
 
-**KubeVirt** is a virtual machine management add-on for Kubernetes.
-The aim is to provide a common ground for virtualization solutions on top of
-Kubernetes.
+The DSX KubeVirt work is open sourced as part of the KubeVirt Accelerated Infrastructure Enablement effort. The `release-1.8-aie-nv` branch follows a narrower WG AIE model focused on an alternative `virt-launcher` image approach, which is different from the model used by NVIDIA DSX. This `release-1.7-aie-nv` branch carries a broader experimental KubeVirt delta: alpha user-facing annotations, admission, controller, launcher, topology, and build changes required to validate the DSX Grace-Blackwell KubeVirt enablement stack for the GB200 compute-tray VM model.
+The long-term goal is to collaborate under the KubeVirt AIE working group, converge on a consensus upstream design, and consolidate implementation toward the KubeVirt main branch and future releases.
 
-## Introduction
+## Architecture
 
-### Virtualization extension for Kubernetes
+| Area | Purpose |
+| :--- | :------ |
+| KubeVirt API and admission | Adds alpha opt-in annotations and validates Grace-specific combinations. |
+| virt-controller and virt-handler | Preserve normal KubeVirt scheduling and device-plugin resource flow while carrying the extra topology data needed by virt-launcher. |
+| virt-launcher conversion | Builds libvirt domain XML with Grace-aware PCIe, NUMA, SMMUv3, IOMMUFD, vCMDQ, and EGM wiring. |
+| QEMU and libvirt RPMs | Uses aarch64 RPMs with NVIDIA Grace hardware-enablement patches while leaving other architectures on upstream defaults. |
+| GPU device plugin or DRA integration | Advertises GPU resources and mounts the host device nodes required by the launcher pod. |
+| Host platform | Provides firmware, kernel, VFIO/IOMMUFD, EGM, and sysfs topology used to construct the guest. |
 
-At its core, KubeVirt extends [Kubernetes][k8s] by adding
-additional virtualization resource types (especially the `VM` type) through
-[Kubernetes's Custom Resource Definitions API][crd].
-By using this mechanism, the Kubernetes API can be used to manage these `VM`
-resources alongside all other resources Kubernetes provides.
+## Grace Features
 
-The resources themselves are not enough to launch virtual machines.
-For this to happen the _functionality and business logic_ needs to be added to
-the cluster. The functionality is not added to Kubernetes itself, but rather
-added to a Kubernetes cluster by _running_ additional controllers and agents
-on an existing cluster.
+- `alpha.kubevirt.io/graceVirtualization` opt-in annotation for baseline Grace host-device wiring plus optional `smmuv3`, `vcmdq`, and `egm` controls.
+- `alpha.kubevirt.io/pciHole64Size` annotation to request a larger 64-bit PCI MMIO aperture for large GPU BARs.
+- PCIe NUMA topology planning for passthrough devices.
+- Guest NUMA distance matrix synthesis for the qualified Grace topology.
+- Root-port PCIe link information derived from host topology where available.
+- vEGM-backed guest memory wiring for EGM-enabled VMs.
+- aarch64 QEMU/libvirt version overrides through `make rpm-deps` without committing private RPM repository URLs.
+- Multi-architecture image build and push support for ARM64 development flows.
 
-The necessary controllers and agents are provided by KubeVirt.
+## Runtime Opt-In
 
-As of today KubeVirt can be used to declaratively
+Enable the Grace feature gates in the KubeVirt CR before using the annotation:
 
- * Create a predefined VM
- * Schedule a VM on a Kubernetes cluster
- * Launch a VM
- * Stop a VM
- * Delete a VM
+```yaml
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+      - HostDevices
+      - GraceIOVirtualization
+      - PCINUMAAwareTopology
+```
 
-[<img src="https://asciinema.org/a/497168.svg" width="50%">](https://asciinema.org/a/497168)
+Use the annotation only for ARM64 VMIs that consume passthrough devices:
 
-## To start using KubeVirt
+```yaml
+metadata:
+  annotations:
+    alpha.kubevirt.io/pciHole64Size: "4294967296" # 4 TiB, in KiB
+    alpha.kubevirt.io/graceVirtualization: '{"smmuv3":true,"vcmdq":true,"egm":true}'
+```
 
-Try our quickstart at [kubevirt.io](https://kubevirt.io/get_kubevirt/).
+Supported `graceVirtualization` keys are:
 
-See our user documentation at [kubevirt.io/docs](https://kubevirt.io/user-guide).
+| Key | Meaning |
+| :-- | :------ |
+| `smmuv3` | Requests SMMUv3/IOMMU wiring. |
+| `vcmdq` | Requests vCMDQ acceleration. Requires `smmuv3=true`; for non-EGM VMs, hugepages are also required. |
+| `egm` | Requests EGM-backed guest memory. Requires `smmuv3=true`, explicit guest memory, dedicated CPU placement, and no hugepages. |
 
-Once you have the basics, you can learn more about how to run KubeVirt and its newest features by taking a look at:
+Omit the annotation for ordinary KubeVirt behavior. Use `{}` only when you want baseline Grace host-device wiring without enabling `smmuv3`, `vcmdq`, or `egm`. The annotation does not request GPUs by itself; the VMI must still use normal KubeVirt `spec.domain.devices.hostDevices` or GPU/DRA configuration, and the resource names must be allowed in `permittedHostDevices`.
 
- * [KubeVirt blog](https://kubevirt.io/blogs/)
- * [KubeVirt Youtube channel](https://www.youtube.com/channel/UC2FH36TbZizw25pVT1P3C3g)
+## EGM Guest Memory
 
-## To start developing KubeVirt
+For EGM-backed VMs, set `spec.domain.memory.guest` to the total EGM memory selected for passthrough. For example, two EGM devices reporting `0x6fc0000000` bytes each provide `915456Mi` total:
 
-To set up a development environment please read our
-[Getting Started Guide](docs/getting-started.md). To learn how to contribute, please read our [contribution guide](https://github.com/kubevirt/kubevirt/blob/main/CONTRIBUTING.md).
+```shell
+for dev in /sys/class/egm/egm*/egm_size; do
+    bytes=$((16#$(cat "$dev" | sed 's/^0x//')))
+    echo "$dev: $((bytes / 1024 / 1024)) MiB"
+done
+```
 
-You can learn more about how KubeVirt is designed (and why it is that way),
-and learn more about the major components by taking a look at
-[our developer documentation](docs/):
+Then set:
 
- * [Architecture](docs/architecture.md) - High-level view on the architecture
- * [Components](docs/components.md) - Detailed look at all components
- * [API Reference](https://kubevirt.io/api-reference/)
+```yaml
+domain:
+  memory:
+    guest: 915456Mi
+```
 
-## Useful links
+Do not set a small pod memory limit such as `10Gi` when the guest memory is hundreds of GiB. For EGM flows, use scheduling requests for launcher overhead and allow the Grace EGM wiring to back the guest memory.
 
-The KubeVirt SIG-release repo is responsible for information regarding upcoming and previous releases. 
+## RPM Dependency Flow
 
- * [KubeVirt to Kubernetes version support matrix](https://github.com/kubevirt/sig-release/blob/main/releases/k8s-support-matrix.md) - Verify the versions of KubeVirt that are built and supported for your version of Kubernetes
- * [Noteworthy changes for the next KubeVirt release](https://github.com/kubevirt/sig-release/blob/main/upcoming-changes.md) - Pre-release notes for the upcoming release
- * [Release schedule](https://github.com/kubevirt/sig-release/blob/main/releases/) - For our current and previous releases
+Private RPM repositories must not be committed. External users should build their own NVIDIA-patched QEMU/libvirt RPMs, serve them from an internal or local HTTP repository, and point KubeVirt at that repository with a local `rpm/nvidia-repo.yaml`.
 
-## Community
+Example:
 
-If you got enough of code and want to speak to people, then you got a couple
-of options:
+```shell
+cp rpm/nvidia-repo.yaml.example rpm/nvidia-repo.yaml
+cp rpm/arch-overrides-nvidia-grace.sh.example rpm/arch-overrides-nvidia-grace.sh
+# update the content in yaml files
 
-* Follow us on [Twitter](https://twitter.com/kubevirt)
-* Chat with us on Slack via [#virtualization @ kubernetes.slack.com](https://kubernetes.slack.com/?redir=%2Farchives%2FC8ED7RKFE)
-* Discuss with us on the [kubevirt-dev Google Group](https://groups.google.com/forum/#!forum/kubevirt-dev)
-* Stay informed about designs and upcoming events by watching our [community content](https://github.com/kubevirt/community/)
+make CUSTOM_REPO=rpm/nvidia-repo.yaml \
+     ARCH_OVERRIDES=rpm/arch-overrides-nvidia-grace.sh \
+     SINGLE_ARCH=aarch64 \
+     rpm-deps
+```
 
-### Related resources
+You can also pass the aarch64 NEVRAs directly:
 
- * [Kubernetes][k8s]
- * [Libvirt][libvirt]
- * [Cockpit][cockpit]
- * [kubevirt.core][kubevirt.core] Ansible collection
+```shell
+make CUSTOM_REPO=rpm/nvidia-repo.yaml \
+     QEMU_VERSION_AARCH64=17:10.1.0+nvidia5-1.el9 \
+     LIBVIRT_VERSION_AARCH64=0:11.9.0+nvidia4-1.el9 \
+     SINGLE_ARCH=aarch64 \
+     rpm-deps
+```
 
-### Submitting patches
+See the NVIDIA docs in this repository for open-source build references:
 
-When sending patches to the project, the submitter is required to certify that
-they have the legal right to submit the code. This is achieved by adding a line
+- [DSX Virtualization Development Environment](docs/NVIDIA/Grace-Environment-Setup.md)
+- [Build NVIDIA QEMU RPMs](docs/NVIDIA/DSX-Virtualization-QEMU-RPM-Build.md)
+- [Build NVIDIA libvirt RPMs](docs/NVIDIA/DSX-Virtualization-Libvirt-RPM-Build.md)
 
-    Signed-off-by: Real Name <email@address.com>
+## Build Images
 
-to the bottom of every commit message. Existence of such a line certifies
-that the submitter has complied with the Developer's Certificate of Origin 1.1,
-(as defined in the file docs/developer-certificate-of-origin).
+After `rpm-deps` updates the Bazel RPM definitions, build and push the KubeVirt images for the target registry:
 
-This line can be automatically added to a commit in the correct format, by
-using the '-s' option to 'git commit'.
+```shell
+DOCKER_PREFIX=quay.io/example/kubevirt-aie \
+DOCKER_TAG=release-1.7-aie-nv-dev \
+BUILD_ARCH=amd64,crossbuild-aarch64 \
+make bazel-push-images
+```
+
+Use a registry that is reachable by the Kubernetes nodes where KubeVirt will be deployed.
+
+## Examples
+
+- [Grace-Blackwell EGM VMI](examples/vmi-dsx-grace-blackwell-egm.yaml)
+
+The example is intentionally parameterized. Update the GPU resource name, PVC, network attachment definition, node selector, guest memory, and PCI hole size to match the target system.
+
+## Related Public Work
+
+- [KubeVirt WG AIE](https://github.com/kubevirt/community/tree/main/wg-aie)
+- [CentOS Accelerated Infrastructure SIG](https://sigs.centos.org/aie/)
+- [VEP-199 NVIDIA Grace-Blackwell Support in KubeVirt](https://github.com/kubevirt/enhancements/pull/270)
+- [KubeVirt Summit talk, EU 2026](https://www.youtube.com/watch?v=jtnRFgu4tdI)
+
+## NVIDIA Contact
+
+- [Fan Zhang](https://github.com/fanzhangio), NVIDIA
+
+## Upstream KubeVirt
+
+KubeVirt is a virtual machine management add-on for Kubernetes. For general KubeVirt documentation, see:
+
+- [KubeVirt user guide](https://kubevirt.io/user-guide)
+- [KubeVirt architecture](https://github.com/kubevirt/kubevirt/blob/main/docs/architecture.md)
+- [KubeVirt API reference](https://kubevirt.io/api-reference/)
 
 ## License
 
-KubeVirt is distributed under the
-[Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt).
-
-    This file is part of the KubeVirt project
-
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-        http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
+KubeVirt is distributed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt).
 
     Copyright The KubeVirt Authors.
-
-[//]: # (Reference links)
-   [k8s]: https://kubernetes.io
-   [crd]: https://kubernetes.io/docs/tasks/access-kubernetes-api/extend-api-custom-resource-definitions/
-   [ovirt]: https://www.ovirt.org
-   [cockpit]: https://cockpit-project.org/
-   [libvirt]: https://www.libvirt.org
-   [kubevirt.core]: https://github.com/kubevirt/kubevirt.core
-
-## FOSSA Status
-
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git.svg?type=large)](https://app.fossa.com/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git?ref=badge_large)

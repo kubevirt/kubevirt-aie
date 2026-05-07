@@ -1,0 +1,115 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  name: dsx-grace-blackwell-egm
+  namespace: default
+  annotations:
+    # Specifies the 64-Bit PCI hole size in KiB overridable for a guest.
+    # The value is in KiB. 4294967296 KiB configures a 4 TiB 64-bit PCI hole.
+    # For a four-GPU passthrough VM, 4TiB is recommended for GB200, while 8TiB is for GB300.
+    alpha.kubevirt.io/pciHole64Size: "4294967296"
+    # GraceVirtualizationAnnotation carries alpha, feature-gated Grace/Blackwell virtualization settings as JSON.
+    # This annotation is a temporary experimental opt-in while the implementation is validated, and may later be
+    # replaced by topology/device inference or typed API fields.
+    #
+    # A non-empty annotation value opts the VMI into baseline Grace-specific wiring for passthrough PCI devices
+    # already assigned to the VMI; it does not request devices or replace permittedHostDevices/device-plugin configuration.
+    #
+    # Supported optional keys:
+    # - smmuv3 requests SMMUv3 IOMMU wiring.
+    # - vcmdq requests vCMDQ acceleration; requires smmuv3=true.
+    # - egm requests EGM wiring; requires smmuv3=true and explicit guest memory equal to
+    #   the total EGM backing size selected for passthrough.
+    #
+    # Omit the annotation entirely for ordinary VMI behavior. Use {} to request only baseline Grace host-device
+    # wiring; in that case smmuv3, vcmdq, and egm all default to false. The annotation requires the
+    # GraceIOVirtualization feature gate and an arm64 VMI.
+    # Example: {"smmuv3":true,"vcmdq":false,"egm":false}
+    # 
+    # If EGM is disabled, then the guest must be backed by regular memory or hugepages.
+    # vCMDQ must be supported by consequtive memory (e.g. hugepages or EGM), otherwise it must be toggled off to avoid boot issues.
+    alpha.kubevirt.io/graceVirtualization: '{"smmuv3":true,"vcmdq":true,"egm":true}'
+spec:
+  architecture: arm64
+  evictionStrategy: None
+  domain:
+    cpu:
+      sockets: 2    # must match host set up, GB200 is a two-socket system
+      cores: 60
+      threads: 1    # must be 1 thread, so the total vcpu is cores x socket x threads, matching the CPU topology of the host
+      maxSockets: 2 # maxSockets must be set to 2.
+      model: host-passthrough
+      dedicatedCpuPlacement: true  # must be enabled for vcpu pining, and kubelet CPUManager must be enabled on host
+      #numa:
+      #  guestMappingPassthrough: {}  # EGM can not be used with hugepages simultaneously
+    memory:
+      # Set this to the total selected EGM memory from /sys/class/egm/egm*/egm_size.
+      # Example: two 457728Mi EGM devices require 915456Mi.
+      # See docs/NVIDIA/Dev-Environment-Setup.md 'EGM Sizing' section for more details.
+      guest: 915456Mi
+    resources:
+      requests:
+        memory: 10Gi
+        ephemeral-storage: 10Gi
+      limits:
+        ephemeral-storage: 10Gi
+    machine:
+      type: virt
+    firmware:
+      bootloader:
+        efi:
+          secureBoot: false # forces libvirt to use AAVMF/EDK2 and avoids Secure Boot issues
+    devices:
+      autoattachGraphicsDevice: false
+      autoattachMemBalloon: false
+      autoattachSerialConsole: true
+      disks:
+      - name: rootdisk
+        bootOrder: 1
+        disk:
+          bus: virtio
+      - name: cloudinitdisk
+        disk:
+          bus: virtio
+      interfaces:
+      - name: default
+        bridge: {}
+      hostDevices:
+      - name: gpu1
+        deviceName: nvidia.com/GB100_HGX_GB200 # resouce name advised by KubeVirt Device Plugin
+      - name: gpu2
+        deviceName: nvidia.com/GB100_HGX_GB200
+      - name: gpu3
+        deviceName: nvidia.com/GB100_HGX_GB200
+      - name: gpu4
+        deviceName: nvidia.com/GB100_HGX_GB200
+  networks:
+  - name: default
+    multus:
+      default: true
+      networkName: default/ovn-primary # Multus network for multi-home VM
+  - multus:
+      networkName: tenant-subnet/ib-network-1
+    name: ib1
+  - multus:
+      networkName: tenant-subnet/ib-network-2
+    name: ib2
+  - multus:
+      networkName: tenant-subnet/ib-network-3
+    name: ib3
+  - multus:
+      networkName: tenant-subnet/ib-network-4
+    name: ib4
+  nodeSelector:
+    node.kubernetes.io/instance-type: grace-blackwell
+  volumes:
+  - name: rootdisk
+    persistentVolumeClaim:
+      claimName: pvc-rootdisk
+  - name: cloudinitdisk # Optional cloud-init disk for VM initialization
+    cloudInitNoCloud: 
+      userData: |-
+        #cloud-config
+        password: ubuntu
+        chpasswd:
+          expire: false
