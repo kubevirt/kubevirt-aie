@@ -63,6 +63,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/topology"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/arch"
+	converternet "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/network"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/vcpu"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice"
@@ -72,7 +73,7 @@ const (
 	deviceTypeNotCompatibleFmt = "device %s is of type lun. Not compatible with a file based disk"
 	defaultIOThread            = uint(1)
 	bootMenuTimeoutMS          = uint(10000)
-	multiQueueMaxQueues        = uint32(256)
+	multiQueueMaxQueues        = converternet.MultiQueueMaxQueues
 	QEMUSeaBiosDebugPipe       = "/var/run/kubevirt-private/QEMUSeaBiosDebugPipe"
 )
 
