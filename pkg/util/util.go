@@ -92,6 +92,16 @@ func IsVFIOVMI(vmi *v1.VirtualMachineInstance) bool {
 	return false
 }
 
+func CountVFIODevices(vmi *v1.VirtualMachineInstance) int {
+	count := len(vmi.Spec.Domain.Devices.GPUs) + len(vmi.Spec.Domain.Devices.HostDevices)
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if iface.SRIOV != nil {
+			count++
+		}
+	}
+	return count
+}
+
 // Check if a VMI spec requests memory overhead
 func RequiresMemoryOverheadReservation(v *v1.VirtualMachineInstance) bool {
 	return v.Spec.Domain.Memory != nil &&

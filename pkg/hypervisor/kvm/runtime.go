@@ -101,6 +101,20 @@ func (k *KvmVirtRuntime) AdjustResources(vmi *v1.VirtualMachineInstance, config 
 
 	memlockSize.Add(*resource.NewScaledQuantity(vmiBaseMemory.ScaledValue(resource.Kilo), resource.Kilo))
 
+	// With a vIOMMU, libvirt locks N * guest_memory for N VFIO devices
+	// (qemuDomainGetMemLockLimitBytes, since libvirt v8.7.0). Each
+	// device gets a separate AddressSpace mapping full guest RAM. The
+	// base overhead already includes 1 * guest_memory, so add (N-1)
+	// more. We apply this unconditionally rather than checking for a
+	// vIOMMU because the domain XML is not yet available at this point
+	// and the over-reservation is harmless — it only raises the rlimit
+	// ceiling without consuming actual memory.
+	if numDevices := util.CountVFIODevices(vmi); numDevices > 1 {
+		extra := resource.NewScaledQuantity(vmiBaseMemory.ScaledValue(resource.Kilo), resource.Kilo)
+		extra.Set(extra.Value() * int64(numDevices-1))
+		memlockSize.Add(*extra)
+	}
+
 	if err := common.SetProcessMemoryLockRLimit(targetProcessID, memlockSize.Value()); err != nil {
 		return fmt.Errorf("failed to set process %d memlock rlimit to %d: %v", targetProcessID, memlockSize.Value(), err)
 	}
