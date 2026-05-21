@@ -17,14 +17,13 @@
 # Copyright 2026 Red Hat, Inc.
 #
 # Syncs NV-variant RPMs (el10nv) for libvirt and qemu-kvm from the
-# CentOS Stream 10 internal koji build system into WORKSPACE and
-# rpm/BUILD.bazel.
+# CentOS Stream 10 AIE compose into WORKSPACE and rpm/BUILD.bazel.
 #
 # Usage:
 #   hack/sync-nv-rpms.sh
 #
 # Environment variables (all optional):
-#   KOJI_BASE_URL        - Base URL for koji packages directory
+#   COMPOSE_BASE_URL     - Base URL for compose repository
 #   LIBVIRT_NV_VERSION   - Override libvirt version (default: auto-discover)
 #   QEMU_NV_VERSION      - Override qemu-kvm version (default: auto-discover)
 #   LIBVIRT_NV_RELEASE   - Override libvirt release (default: auto-discover latest el10nv)
@@ -38,7 +37,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_FILE="${REPO_DIR}/WORKSPACE"
 BUILD_FILE="${REPO_DIR}/rpm/BUILD.bazel"
 
-KOJI_BASE_URL="${KOJI_BASE_URL:-https://kojihub.stream.centos.org/kojifiles/packages}"
+COMPOSE_BASE_URL="${COMPOSE_BASE_URL:-https://composes.stream.centos.org/stream-10/aie/nv}"
 LIBVIRT_NV_VERSION="${LIBVIRT_NV_VERSION:-}"
 QEMU_NV_VERSION="${QEMU_NV_VERSION:-}"
 LIBVIRT_NV_RELEASE="${LIBVIRT_NV_RELEASE:-}"
@@ -93,28 +92,44 @@ QEMU_SUBPKGS=(
 # Functions
 # ---------------------------------------------------------------------------
 
-discover_latest_version() {
-    local package=$1
-    curl -sSL "${KOJI_BASE_URL}/${package}/" |
-        grep -oP 'href="\K[0-9][^"]*(?=/")' |
+download_pkglists() {
+    local arch=$1
+    local pkglist="${TMPDIR}/pkglist_${arch}"
+    if [[ ! -f "${pkglist}" ]]; then
+        curl -sSL "${COMPOSE_BASE_URL}/${arch}/pkglist" >"${pkglist}"
+        curl -sSL "${COMPOSE_BASE_URL}/${arch}/debug/pkglist" |
+            sed 's|^\.\./||' >>"${pkglist}"
+    fi
+    echo "${pkglist}"
+}
+
+discover_latest_nvr() {
+    local ref_subpkg=$1
+    local pkglist
+    pkglist=$(download_pkglists x86_64)
+    grep "/${ref_subpkg}-[0-9]" "${pkglist}" |
+        grep '\.el10nv' |
+        grep -oP '[^/]+$' |
+        sed "s/^${ref_subpkg}-//; s/\.x86_64\.rpm$//" |
         sort -V | tail -1
 }
 
-discover_latest_release() {
-    local package=$1
+compose_rpm_url() {
+    local subpkg=$1
     local version=$2
-    curl -sSL "${KOJI_BASE_URL}/${package}/${version}/" |
-        grep -oP 'href="\K[^"]*\.el10nv[^"]*(?=/")' |
-        grep -v ',draft_' |
-        sort -V | tail -1
+    local release=$3
+    local arch=$4
+    local rpm_filename="${subpkg}-${version}-${release}.${arch}.rpm"
+    local first_letter="${subpkg:0:1}"
+    echo "${COMPOSE_BASE_URL}/${arch}/Packages/${first_letter}/${rpm_filename}"
 }
 
 get_epoch() {
-    local source_pkg=$1
-    local subpkg=$2
-    local version=$3
-    local release=$4
-    local rpm_url="${KOJI_BASE_URL}/${source_pkg}/${version}/${release}/x86_64/${subpkg}-${version}-${release}.x86_64.rpm"
+    local subpkg=$1
+    local version=$2
+    local release=$3
+    local rpm_url
+    rpm_url=$(compose_rpm_url "${subpkg}" "${version}" "${release}" x86_64)
     local tmpfile="${TMPDIR}/epoch.rpm"
 
     curl -sSL -o "${tmpfile}" "${rpm_url}"
@@ -126,20 +141,18 @@ get_epoch() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Resolve versions and releases
+# 1. Resolve versions and releases from compose pkglist
 # ---------------------------------------------------------------------------
 
-if [[ -z "${LIBVIRT_NV_VERSION}" ]]; then
-    LIBVIRT_NV_VERSION=$(discover_latest_version libvirt)
+if [[ -z "${LIBVIRT_NV_VERSION}" || -z "${LIBVIRT_NV_RELEASE}" ]]; then
+    libvirt_nvr=$(discover_latest_nvr libvirt-libs)
+    LIBVIRT_NV_VERSION="${LIBVIRT_NV_VERSION:-${libvirt_nvr%%-*}}"
+    LIBVIRT_NV_RELEASE="${LIBVIRT_NV_RELEASE:-${libvirt_nvr#*-}}"
 fi
-if [[ -z "${LIBVIRT_NV_RELEASE}" ]]; then
-    LIBVIRT_NV_RELEASE=$(discover_latest_release libvirt "${LIBVIRT_NV_VERSION}")
-fi
-if [[ -z "${QEMU_NV_VERSION}" ]]; then
-    QEMU_NV_VERSION=$(discover_latest_version qemu-kvm)
-fi
-if [[ -z "${QEMU_NV_RELEASE}" ]]; then
-    QEMU_NV_RELEASE=$(discover_latest_release qemu-kvm "${QEMU_NV_VERSION}")
+if [[ -z "${QEMU_NV_VERSION}" || -z "${QEMU_NV_RELEASE}" ]]; then
+    qemu_nvr=$(discover_latest_nvr qemu-kvm-core)
+    QEMU_NV_VERSION="${QEMU_NV_VERSION:-${qemu_nvr%%-*}}"
+    QEMU_NV_RELEASE="${QEMU_NV_RELEASE:-${qemu_nvr#*-}}"
 fi
 
 echo "Syncing libvirt ${LIBVIRT_NV_VERSION}-${LIBVIRT_NV_RELEASE} (x86_64, aarch64)"
@@ -149,8 +162,8 @@ echo "Syncing qemu-kvm ${QEMU_NV_VERSION}-${QEMU_NV_RELEASE} (x86_64, aarch64)"
 # 2. Get epochs (once per source package)
 # ---------------------------------------------------------------------------
 
-LIBVIRT_EPOCH=$(get_epoch libvirt libvirt-client "${LIBVIRT_NV_VERSION}" "${LIBVIRT_NV_RELEASE}")
-QEMU_EPOCH=$(get_epoch qemu-kvm qemu-kvm-core "${QEMU_NV_VERSION}" "${QEMU_NV_RELEASE}")
+LIBVIRT_EPOCH=$(get_epoch libvirt-client "${LIBVIRT_NV_VERSION}" "${LIBVIRT_NV_RELEASE}")
+QEMU_EPOCH=$(get_epoch qemu-kvm-core "${QEMU_NV_VERSION}" "${QEMU_NV_RELEASE}")
 
 # ---------------------------------------------------------------------------
 # 3. Determine old el10 names for BUILD.bazel replacement and insertion points
@@ -201,14 +214,13 @@ echo "Downloading and hashing RPMs..."
 
 declare -A SHA256S   # key: "subpkg:arch" -> sha256
 declare -A NEW_NAMES # key: "subpkg:arch" -> new el10nv bazel name
-declare -A RPM_URLS  # key: "subpkg:arch" -> koji RPM URL
+declare -A RPM_URLS  # key: "subpkg:arch" -> compose RPM URL
 
 download_subpackages() {
-    local source_pkg=$1
-    local version=$2
-    local release=$3
-    local epoch=$4
-    shift 4
+    local version=$1
+    local release=$2
+    local epoch=$3
+    shift 3
     local subpkgs=("$@")
 
     for entry in "${subpkgs[@]}"; do
@@ -218,7 +230,8 @@ download_subpackages() {
         IFS=',' read -ra arch_list <<<"${arches}"
         for arch in "${arch_list[@]}"; do
             local rpm_filename="${subpkg}-${version}-${release}.${arch}.rpm"
-            local rpm_url="${KOJI_BASE_URL}/${source_pkg}/${version}/${release}/${arch}/${rpm_filename}"
+            local rpm_url
+            rpm_url=$(compose_rpm_url "${subpkg}" "${version}" "${release}" "${arch}")
             local bazel_name="${subpkg}-${epoch}__${version}-${release}.${arch}"
 
             local key="${subpkg}:${arch}"
@@ -244,8 +257,8 @@ download_subpackages() {
     done
 }
 
-download_subpackages libvirt "${LIBVIRT_NV_VERSION}" "${LIBVIRT_NV_RELEASE}" "${LIBVIRT_EPOCH}" "${LIBVIRT_SUBPKGS[@]}"
-download_subpackages qemu-kvm "${QEMU_NV_VERSION}" "${QEMU_NV_RELEASE}" "${QEMU_EPOCH}" "${QEMU_SUBPKGS[@]}"
+download_subpackages "${LIBVIRT_NV_VERSION}" "${LIBVIRT_NV_RELEASE}" "${LIBVIRT_EPOCH}" "${LIBVIRT_SUBPKGS[@]}"
+download_subpackages "${QEMU_NV_VERSION}" "${QEMU_NV_RELEASE}" "${QEMU_EPOCH}" "${QEMU_SUBPKGS[@]}"
 
 # ---------------------------------------------------------------------------
 # 5. Generate insertion files for WORKSPACE
