@@ -1,148 +1,113 @@
-# KubeVirt
+# KubeVirt AIE
 
-<p align="center">
-<img src="https://github.com/kubevirt/community/blob/main/logo/KubeVirt_icon.png" width="100">
-</p>
+**KubeVirt Accelerated Infrastructure Enablement (AIE)** is a release-branch fork of [KubeVirt](https://github.com/kubevirt/kubevirt) that produces an alternative `virt-launcher` container image based on [CentOS Stream 10](https://centos.org/) with NVIDIA-optimised (el10nv) RPMs for libvirt and QEMU. The image includes IOMMU-FD support and backported device patches required for GPU passthrough on NVIDIA ARM64 platforms such as GraceHopper, GraceBlackwell, and Vera Rubin.
 
+This repository tracks the upstream KubeVirt `release-1.8` branch with a minimal set of additional commits. Only the `virt-launcher` image is produced here; all other KubeVirt components (virt-operator, virt-api, virt-controller, virt-handler) are consumed from the standard KubeVirt release.
 
-<div align="center">
-    
-  [![Build Status](https://prow.ci.kubevirt.io/badge.svg?jobs=push-kubevirt-main)](https://prow.ci.kubevirt.io/?job=push-kubevirt-main)
-  [![Go Report Card](https://goreportcard.com/badge/github.com/kubevirt/kubevirt)](https://goreportcard.com/report/github.com/kubevirt/kubevirt)
-  [![Licensed under Apache License version 2.0](https://img.shields.io/github/license/kubevirt/kubevirt.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-  [![Coverage Status](https://img.shields.io/coveralls/kubevirt/kubevirt/main.svg)](https://coveralls.io/github/kubevirt/kubevirt?branch=main)
-  [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/3203/badge)](https://bestpractices.coreinfrastructure.org/projects/3203)
-  [![Visit our Slack channel](https://img.shields.io/badge/slack-@kubernetes/kubevirt--dev-40abb8.svg?logo=slack)](https://kubernetes.slack.com/?redir=%2Farchives%2FC0163DT0R8X)
-  [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git.svg?type=shield)](https://app.fossa.com/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git?ref=badge_shield)
-      
-</div>
+## Why a separate fork?
 
+GPU passthrough on ARM64 depends on a newer userspace stack (IOMMU-FD, backported QEMU device patches, libvirt changes) that is only available in the CentOS Stream 10 el10nv RPM variants. Since the standard KubeVirt `virt-launcher` is based on CentOS Stream 9, the alternative image must be built and delivered separately.
 
+The [WG AIE](https://github.com/kubevirt/community/tree/main/wg-aie) requires that changes carried in this fork are upstreamed back into [kubevirt/kubevirt](https://github.com/kubevirt/kubevirt) as soon as possible. Retiring this fork requires upstreaming at two levels: the el10nv RPM patches must be integrated into the main CentOS Stream 10 repositories by the AIE SIG, and the broader [CentOS Stream 10 transition (VEP #210)](https://github.com/kubevirt/enhancements/issues/210) must land in KubeVirt (planned across v1.9-v1.11). Only once both are complete can the standard KubeVirt `virt-launcher` build include the necessary hardware enablement and this fork be retired.
 
-**KubeVirt** is a virtual machine management add-on for Kubernetes.
-The aim is to provide a common ground for virtualization solutions on top of
-Kubernetes.
+## KubeVirt WG AIE
 
-## Introduction
+The [KubeVirt Accelerated Infrastructure Enablement Working Group (WG AIE)](https://github.com/kubevirt/community/tree/main/wg-aie) aims to track and where possible extend KubeVirt in line with the CentOS Stream Accelerated Infrastructure Enablement SIG. The working group is a stakeholder of both sig-compute and sig-network within the KubeVirt community.
 
-### Virtualization extension for Kubernetes
+**Chairs:**
 
-At its core, KubeVirt extends [Kubernetes][k8s] by adding
-additional virtualization resource types (especially the `VM` type) through
-[Kubernetes's Custom Resource Definitions API][crd].
-By using this mechanism, the Kubernetes API can be used to manage these `VM`
-resources alongside all other resources Kubernetes provides.
+- [Lee Yarwood](https://github.com/lyarwood), Red Hat
+- [Alay Patel](https://github.com/alaypatel07), NVIDIA
 
-The resources themselves are not enough to launch virtual machines.
-For this to happen the _functionality and business logic_ needs to be added to
-the cluster. The functionality is not added to Kubernetes itself, but rather
-added to a Kubernetes cluster by _running_ additional controllers and agents
-on an existing cluster.
+**Meetings:**
 
-The necessary controllers and agents are provided by KubeVirt.
+- Fortnightly on Thursdays at 15:00 UTC
+- [Zoom link](https://zoom.us/j/92261532235)
+- [Meeting notes](https://docs.google.com/document/d/1Tz7GubzbSOliRv2kFXamVhV66v1Wo9HH9hwwRQVYrDk)
 
-As of today KubeVirt can be used to declaratively
+## CentOS Stream AIE SIG
 
- * Create a predefined VM
- * Schedule a VM on a Kubernetes cluster
- * Launch a VM
- * Stop a VM
- * Delete a VM
+This work is aligned with the [CentOS Accelerated Infrastructure SIG](https://sigs.centos.org/aie/), which produces the el10nv RPM variants of libvirt and QEMU in CentOS Stream 10. The AIE SIG focuses on enabling accelerated and heterogeneous computing infrastructure, with packages optimised for NVIDIA hardware available from [CentOS Stream 10 koji](https://kojihub.stream.centos.org). WG AIE coordinates the integration of these packages into the KubeVirt ecosystem. For more information on the broader CentOS AIE SIG initiative, see the [CentOS Accelerated Infrastructure SIG documentation](https://docs.centos.org/centos-accelerated-infrastructure-sig/).
 
-[<img src="https://asciinema.org/a/497168.svg" width="50%">](https://asciinema.org/a/497168)
+## Architecture
 
-## To start using KubeVirt
+The kubevirt-aie `virt-launcher` image is one component of a larger architecture for NVIDIA hardware enablement in KubeVirt. The full system consists of four components:
 
-Try our quickstart at [kubevirt.io](https://kubevirt.io/get_kubevirt/).
+| Component | Repository | Summary |
+| :-------- | :--------- | :------ |
+| **kubevirt-aie virt-launcher** | This repo | CentOS Stream 10-based `virt-launcher` with el10nv RPMs for libvirt and QEMU |
+| **AIE webhook** | [kubevirt-aie-webhook](https://github.com/kubevirt/kubevirt-aie-webhook) | Mutating admission webhook that replaces the launcher image, injects IOMMUFD resource limits, and optionally adds node affinity |
+| **IOMMUFD device plugin** | [iommufd-device-plugin](https://github.com/kubevirt/iommufd-device-plugin) | Kubernetes device plugin that opens and configures `/dev/iommu` on the host and passes the file descriptor to virt-launcher via SCM_RIGHTS |
+| **HCO integration** | [hyperconverged-cluster-operator](https://github.com/kubevirt/hyperconverged-cluster-operator) | HCO operand handlers that deploy and reconcile the webhook and device plugin on OpenShift |
 
-See our user documentation at [kubevirt.io/docs](https://kubevirt.io/user-guide).
+For detailed design documents covering each component, see the [kubevirt-aie-veps](https://github.com/kubevirt/kubevirt-aie-veps) repository.
 
-Once you have the basics, you can learn more about how to run KubeVirt and its newest features by taking a look at:
+## Rebasing on upstream releases
 
- * [KubeVirt blog](https://kubevirt.io/blogs/)
- * [KubeVirt Youtube channel](https://www.youtube.com/channel/UC2FH36TbZizw25pVT1P3C3g)
+Manual rebases onto new v1.8.z releases from the upstream [kubevirt/kubevirt `release-1.8`](https://github.com/kubevirt/kubevirt/tree/release-1.8) branch will be performed on this branch. The patch delta is kept intentionally small to minimise rebase friction.
 
-## To start developing KubeVirt
+## What this fork changes
 
-To set up a development environment please read our
-[Getting Started Guide](docs/getting-started.md). To learn how to contribute, please read our [contribution guide](https://github.com/kubevirt/kubevirt/blob/main/CONTRIBUTING.md).
+The delta against the upstream `release-1.8` branch is intentionally small:
 
-You can learn more about how KubeVirt is designed (and why it is that way),
-and learn more about the major components by taking a look at
-[our developer documentation](docs/):
+- **NV RPM sync infrastructure** (`hack/sync-nv-rpms.sh`) -- Automated discovery and download of el10nv RPMs from CentOS Stream 10 koji
+- **WORKSPACE and rpm/BUILD.bazel updates** -- Bazel build definitions for the el10nv RPM packages
+- **CentOS Stream 10 builder** (`hack/builder/Dockerfile.cs10`) -- Build toolchain for multi-architecture (x86_64, aarch64) image builds
+- **WIP image push script** (`hack/push-virt-launcher-pr.sh`) -- Convenience script for building and pushing images from feature branches
 
- * [Architecture](docs/architecture.md) - High-level view on the architecture
- * [Components](docs/components.md) - Detailed look at all components
- * [API Reference](https://kubevirt.io/api-reference/)
+## Quick start
 
-## Useful links
+### Syncing NV RPMs
 
-The KubeVirt SIG-release repo is responsible for information regarding upcoming and previous releases. 
+```shell
+# Auto-discover latest el10nv versions from koji
+hack/sync-nv-rpms.sh
 
- * [KubeVirt to Kubernetes version support matrix](https://github.com/kubevirt/sig-release/blob/main/releases/k8s-support-matrix.md) - Verify the versions of KubeVirt that are built and supported for your version of Kubernetes
- * [Noteworthy changes for the next KubeVirt release](https://github.com/kubevirt/sig-release/blob/main/upcoming-changes.md) - Pre-release notes for the upcoming release
- * [Release schedule](https://github.com/kubevirt/sig-release/blob/main/releases/) - For our current and previous releases
+# Override specific versions
+LIBVIRT_NV_VERSION=11.10.0 QEMU_NV_VERSION=10.1.0 hack/sync-nv-rpms.sh
+```
+
+### Building and pushing a WIP virt-launcher image
+
+```shell
+# Push from current branch with auto-generated tag
+hack/push-virt-launcher-pr.sh
+
+# Override registry and tag
+DOCKER_PREFIX=quay.io/myorg DOCKER_TAG=test-1 hack/push-virt-launcher-pr.sh
+```
+
+### Building release images
+
+```shell
+DOCKER_PREFIX=quay.io/kubevirt/kubevirt-aie \
+DOCKER_TAG=v1.8.0-aie-nv \
+BUILD_ARCH=amd64,crossbuild-aarch64 \
+make bazel-push-images
+```
+
+## Upstream KubeVirt
+
+This fork is based on [KubeVirt](https://github.com/kubevirt/kubevirt), a virtual machine management add-on for Kubernetes. For general KubeVirt documentation, see:
+
+- [KubeVirt user guide](https://kubevirt.io/user-guide)
+- [KubeVirt architecture](https://github.com/kubevirt/kubevirt/blob/main/docs/architecture.md)
+- [KubeVirt API reference](https://kubevirt.io/api-reference/)
 
 ## Community
 
-If you got enough of code and want to speak to people, then you got a couple
-of options:
-
-* Follow us on [Twitter](https://twitter.com/kubevirt)
-* Chat with us on Slack via [#virtualization @ kubernetes.slack.com](https://kubernetes.slack.com/?redir=%2Farchives%2FC8ED7RKFE)
-* Discuss with us on the [kubevirt-dev Google Group](https://groups.google.com/forum/#!forum/kubevirt-dev)
-* Stay informed about designs and upcoming events by watching our [community content](https://github.com/kubevirt/community/)
-
-### Related resources
-
- * [Kubernetes][k8s]
- * [Libvirt][libvirt]
- * [Cockpit][cockpit]
- * [kubevirt.core][kubevirt.core] Ansible collection
-
-### Submitting patches
-
-When sending patches to the project, the submitter is required to certify that
-they have the legal right to submit the code. This is achieved by adding a line
-
-    Signed-off-by: Real Name <email@address.com>
-
-to the bottom of every commit message. Existence of such a line certifies
-that the submitter has complied with the Developer's Certificate of Origin 1.1,
-(as defined in the file docs/developer-certificate-of-origin).
-
-This line can be automatically added to a commit in the correct format, by
-using the '-s' option to 'git commit'.
+- [CentOS Accelerated Infrastructure SIG](https://docs.centos.org/centos-accelerated-infrastructure-sig/) -- Upstream SIG producing the el10nv RPM variants
+- [KubeVirt Slack](https://kubernetes.slack.com/?redir=%2Farchives%2FC8ED7RKFE) -- `#virtualization` on kubernetes.slack.com
+- [kubevirt-dev Google Group](https://groups.google.com/forum/#!forum/kubevirt-dev)
 
 ## License
 
 KubeVirt is distributed under the
 [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt).
 
-    This file is part of the KubeVirt project
-
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
-
-        http://www.apache.org/licenses/LICENSE-2.0
-
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
-
     Copyright The KubeVirt Authors.
 
 [//]: # (Reference links)
    [k8s]: https://kubernetes.io
    [crd]: https://kubernetes.io/docs/tasks/access-kubernetes-api/extend-api-custom-resource-definitions/
-   [ovirt]: https://www.ovirt.org
-   [cockpit]: https://cockpit-project.org/
    [libvirt]: https://www.libvirt.org
-   [kubevirt.core]: https://github.com/kubevirt/kubevirt.core
-
-## FOSSA Status
-
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git.svg?type=large)](https://app.fossa.com/projects/custom%2B13072%2Fgit%40github.com%3Akubevirt%2Fkubevirt.git?ref=badge_large)
