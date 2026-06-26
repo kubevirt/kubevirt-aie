@@ -34,6 +34,13 @@ KUBEVIRT_CENTOS_STREAM_VERSION=${KUBEVIRT_CENTOS_STREAM_VERSION:-9}
 # Bazel config flag for CentOS Stream version selection
 BAZEL_CS_CONFIG="--config=cs${KUBEVIRT_CENTOS_STREAM_VERSION}"
 
+# Include NV libvirt/qemu debuginfo in virt-launcher image
+if [ "${KUBEVIRT_AIE_NV_INCLUDE_DEBUGINFO}" = "true" ]; then
+    BAZEL_DEBUGINFO_FLAG="--define=include_debuginfo=true"
+else
+    BAZEL_DEBUGINFO_FLAG=""
+fi
+
 KUBEVIRT_DIR="$(
     cd "$(dirname "$BASH_SOURCE[0]")/../"
     pwd
