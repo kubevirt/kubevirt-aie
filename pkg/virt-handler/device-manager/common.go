@@ -290,6 +290,31 @@ func formatVFIODeviceSpecs(devID string) []*v1beta1.DeviceSpec {
 	return devSpecs
 }
 
+// formatVFIOCdevDeviceSpecs returns device specs for the VFIO cdev character
+// device associated with a PCI address. The cdev device name is discovered via
+// sysfs at /sys/bus/pci/devices/<pciAddress>/vfio-dev/. When IOMMUFD is enabled,
+// libvirt uses the cdev path (/dev/vfio/devices/vfioN) instead of the legacy
+// VFIO group path.
+func formatVFIOCdevDeviceSpecs(pciAddress string) []*v1beta1.DeviceSpec {
+	vfioDevDir := filepath.Join(pciBasePath, pciAddress, "vfio-dev")
+	entries, err := os.ReadDir(vfioDevDir)
+	if err != nil {
+		log.DefaultLogger().V(4).Infof("No VFIO cdev found for %s: %v", pciAddress, err)
+		return nil
+	}
+
+	devSpecs := make([]*v1beta1.DeviceSpec, 0, len(entries))
+	for _, entry := range entries {
+		cdevPath := filepath.Join("/dev/vfio/devices", entry.Name())
+		devSpecs = append(devSpecs, &v1beta1.DeviceSpec{
+			HostPath:      cdevPath,
+			ContainerPath: cdevPath,
+			Permissions:   "mrw",
+		})
+	}
+	return devSpecs
+}
+
 type deviceHealth struct {
 	DevId  string
 	Health string

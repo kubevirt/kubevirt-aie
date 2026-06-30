@@ -40,9 +40,10 @@ import (
 )
 
 const (
-	vfioDevicePath = "/dev/vfio/"
-	vfioMount      = "/dev/vfio/vfio"
-	pciBasePath    = "/sys/bus/pci/devices"
+	vfioDevicePath     = "/dev/vfio/"
+	vfioCdevDevicePath = "/dev/vfio/devices/"
+	vfioMount          = "/dev/vfio/vfio"
+	pciBasePath        = "/sys/bus/pci/devices"
 )
 
 type PCIDevice struct {
@@ -164,6 +165,7 @@ func (dpi *PCIDevicePlugin) Allocate(_ context.Context, r *pluginapi.AllocateReq
 			}
 			allocatedDevices = append(allocatedDevices, devPCIAddress)
 			deviceSpecs = append(deviceSpecs, formatVFIODeviceSpecs(devID)...)
+			deviceSpecs = append(deviceSpecs, formatVFIOCdevDeviceSpecs(devPCIAddress)...)
 		}
 		containerResponse.Devices = deviceSpecs
 		envVar := make(map[string]string)
