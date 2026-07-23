@@ -44,8 +44,8 @@ QEMU_NV_VERSION="${QEMU_NV_VERSION:-}"
 LIBVIRT_NV_RELEASE="${LIBVIRT_NV_RELEASE:-}"
 QEMU_NV_RELEASE="${QEMU_NV_RELEASE:-}"
 
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "${TMPDIR}"' EXIT
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "${WORK_DIR}"' EXIT
 
 # Sub-packages to sync, with their supported architectures.
 # Only packages/arches that already have el10 entries in WORKSPACE are included.
@@ -95,7 +95,7 @@ QEMU_SUBPKGS=(
 
 discover_latest_version() {
     local package=$1
-    curl -sSL "${KOJI_BASE_URL}/${package}/" |
+    curl -fsSL "${KOJI_BASE_URL}/${package}/" |
         grep -oP 'href="\K[0-9][^"]*(?=/")' |
         sort -V | tail -1
 }
@@ -103,7 +103,7 @@ discover_latest_version() {
 discover_latest_release() {
     local package=$1
     local version=$2
-    curl -sSL "${KOJI_BASE_URL}/${package}/${version}/" |
+    curl -fsSL "${KOJI_BASE_URL}/${package}/${version}/" |
         grep -oP 'href="\K[^"]*\.el10nv[^"]*(?=/")' |
         grep -v ',draft_' |
         sort -V | tail -1
@@ -115,9 +115,9 @@ get_epoch() {
     local version=$3
     local release=$4
     local rpm_url="${KOJI_BASE_URL}/${source_pkg}/${version}/${release}/x86_64/${subpkg}-${version}-${release}.x86_64.rpm"
-    local tmpfile="${TMPDIR}/epoch.rpm"
+    local tmpfile="${WORK_DIR}/epoch.rpm"
 
-    curl -sSL -o "${tmpfile}" "${rpm_url}"
+    curl -fsSL -o "${tmpfile}" "${rpm_url}"
     local epoch
     epoch=$(rpm -qp --qf '%{EPOCH}' "${tmpfile}" 2>/dev/null)
     [[ "${epoch}" == "(none)" ]] && epoch=0
@@ -230,10 +230,10 @@ download_subpackages() {
                 continue
             fi
 
-            local tmpfile="${TMPDIR}/${rpm_filename}"
+            local tmpfile="${WORK_DIR}/${rpm_filename}"
 
             echo "  ${rpm_filename}"
-            curl -sSL -o "${tmpfile}" "${rpm_url}"
+            curl -fsSL -o "${tmpfile}" "${rpm_url}"
             local sha256
             sha256=$(sha256sum "${tmpfile}" | awk '{print $1}')
             rm -f "${tmpfile}"
@@ -311,7 +311,7 @@ generate_insert_file() {
                 echo "WARNING: No el10 entry found for ${subpkg} or parent ${parent_pkg}, skipping" >&2
                 continue
             fi
-            local insert_file="${INSERT_FILES[${parent_anchor}]:-${TMPDIR}/insert_${parent_pkg}.txt}"
+            local insert_file="${INSERT_FILES[${parent_anchor}]:-${WORK_DIR}/insert_${parent_pkg}.txt}"
             INSERT_FILES["${parent_anchor}"]="${insert_file}"
             IFS=',' read -ra arch_list <<<"${arches}"
             for arch in "${arch_list[@]}"; do
@@ -335,7 +335,7 @@ EOF
 
         # Reuse an existing insert file if a debug package already claimed
         # this anchor (e.g. libvirt-debuginfo processed before libvirt-libs).
-        local insert_file="${INSERT_FILES[${last_el10}]:-${TMPDIR}/insert_${subpkg}.txt}"
+        local insert_file="${INSERT_FILES[${last_el10}]:-${WORK_DIR}/insert_${subpkg}.txt}"
         if [[ -z "${INSERT_FILES[${last_el10}]:-}" ]]; then
             : >"${insert_file}"
         fi
@@ -377,14 +377,14 @@ echo ""
 echo "Updating WORKSPACE..."
 
 # Write the insert map (last_el10_name|file_path) for awk
-insert_map_file="${TMPDIR}/insert_map.txt"
+insert_map_file="${WORK_DIR}/insert_map.txt"
 : >"${insert_map_file}"
 for name in "${!INSERT_FILES[@]}"; do
     echo "${name}|${INSERT_FILES[${name}]}" >>"${insert_map_file}"
 done
 
 # Write the sub-package name list for awk
-subpkg_list_file="${TMPDIR}/subpkg_list.txt"
+subpkg_list_file="${WORK_DIR}/subpkg_list.txt"
 printf '%s\n' "${all_subpkg_names[@]}" >"${subpkg_list_file}"
 
 # Single awk pass to remove stale el10nv blocks and insert new ones.
@@ -392,10 +392,10 @@ printf '%s\n' "${all_subpkg_names[@]}" >"${subpkg_list_file}"
 awk -v insert_map_file="${insert_map_file}" \
     -v subpkg_list_file="${subpkg_list_file}" \
     -f "${SCRIPT_DIR}/sync-nv-rpms-update-workspace.awk" \
-    "${WORKSPACE_FILE}" >"${TMPDIR}/WORKSPACE.new"
+    "${WORKSPACE_FILE}" >"${WORK_DIR}/WORKSPACE.new"
 
-workspace_entries=$(grep -c 'name = ".*el10nv' "${TMPDIR}/WORKSPACE.new" || true)
-mv "${TMPDIR}/WORKSPACE.new" "${WORKSPACE_FILE}"
+workspace_entries=$(grep -c 'name = ".*el10nv' "${WORK_DIR}/WORKSPACE.new" || true)
+mv "${WORK_DIR}/WORKSPACE.new" "${WORKSPACE_FILE}"
 
 echo "Updated WORKSPACE: ${workspace_entries} rpm() entries added/updated"
 
