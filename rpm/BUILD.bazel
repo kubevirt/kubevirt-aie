@@ -342,6 +342,51 @@ selects.config_setting_group(
     ],
 )
 
+rpmtree(
+    name = "nv_debuginfo_aarch64_cs10",
+    rpms = [
+        "@libvirt-client-debuginfo-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@libvirt-daemon-common-debuginfo-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@libvirt-daemon-driver-qemu-debuginfo-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@libvirt-daemon-log-debuginfo-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@libvirt-debuginfo-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@libvirt-debugsource-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@libvirt-libs-debuginfo-0__11.10.0-10.7.el10nv.aarch64//rpm",
+        "@qemu-img-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-common-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-core-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-debugsource-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-device-display-virtio-gpu-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-device-display-virtio-gpu-pci-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-device-usb-host-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+        "@qemu-kvm-device-usb-redirect-debuginfo-19__10.1.0-19.el10nv.1.aarch64//rpm",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rpmtree(
+    name = "nv_debuginfo_x86_64_cs10",
+    rpms = [
+        "@libvirt-client-debuginfo-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@libvirt-daemon-common-debuginfo-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@libvirt-daemon-driver-qemu-debuginfo-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@libvirt-daemon-log-debuginfo-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@libvirt-debuginfo-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@libvirt-debugsource-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@libvirt-libs-debuginfo-0__11.10.0-10.7.el10nv.x86_64//rpm",
+        "@qemu-img-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-common-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-core-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-debugsource-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-device-display-virtio-gpu-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-device-display-virtio-gpu-pci-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-device-display-virtio-vga-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-device-usb-host-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+        "@qemu-kvm-device-usb-redirect-debuginfo-19__10.1.0-19.el10nv.1.x86_64//rpm",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 centos_stream_alias(
     name = "nv_debuginfo_aarch64",
     cs10_target = ":nv_debuginfo_aarch64_cs10",
