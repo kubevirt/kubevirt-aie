@@ -387,6 +387,7 @@ rpmtree(
     visibility = ["//visibility:public"],
 )
 
+# NV debuginfo is CS10-only; cs9 alias points to the same target.
 centos_stream_alias(
     name = "nv_debuginfo_aarch64",
     cs10_target = ":nv_debuginfo_aarch64_cs10",

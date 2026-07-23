@@ -17,7 +17,7 @@
 # Copyright the KubeVirt Authors.
 #
 
-set -e
+set -eo pipefail
 
 DOCKER_PREFIX=${DOCKER_PREFIX:-"quay.io/kubevirt/kubevirt-aie"}
 KUBEVIRT_CENTOS_STREAM_VERSION=${KUBEVIRT_CENTOS_STREAM_VERSION:-"10"}
