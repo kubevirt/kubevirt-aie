@@ -2,7 +2,7 @@
 
 **KubeVirt Accelerated Infrastructure Enablement (AIE)** is a release-branch fork of [KubeVirt](https://github.com/kubevirt/kubevirt) that produces an alternative `virt-launcher` container image based on [CentOS Stream 10](https://centos.org/) with NVIDIA-optimised (el10nv) RPMs for libvirt and QEMU. The image includes IOMMU-FD support and backported device patches required for GPU passthrough on NVIDIA ARM64 platforms such as GraceHopper, GraceBlackwell, and Vera Rubin.
 
-This repository tracks the upstream KubeVirt `release-1.8` branch with a minimal set of additional commits. Only the `virt-launcher` image is produced here; all other KubeVirt components (virt-operator, virt-api, virt-controller, virt-handler) are consumed from the standard KubeVirt release.
+This repository tracks the upstream KubeVirt `release-1.9` branch with a minimal set of additional commits. Only the `virt-launcher` image is produced here; all other KubeVirt components (virt-operator, virt-api, virt-controller, virt-handler) are consumed from the standard KubeVirt release.
 
 ## Why a separate fork?
 
@@ -18,6 +18,7 @@ The [KubeVirt Accelerated Infrastructure Enablement Working Group (WG AIE)](http
 
 - [Lee Yarwood](https://github.com/lyarwood), Red Hat
 - [Alay Patel](https://github.com/alaypatel07), NVIDIA
+- [Fan Zhang](https://github.com/fanzhangio), NVIDIA
 
 **Meetings:**
 
@@ -31,24 +32,17 @@ This work is aligned with the [CentOS Accelerated Infrastructure SIG](https://si
 
 ## Architecture
 
-The kubevirt-aie `virt-launcher` image is one component of a larger architecture for NVIDIA hardware enablement in KubeVirt. The full system consists of four components:
+From v1.9, GPU passthrough on NVIDIA ARM64 platforms is enabled through upstream KubeVirt feature gates (`GraceIOVirtualization`, `IOMMUFD`). IOMMUFD support is built into `virt-handler` — no external device plugin or webhook is required. This repository provides the CentOS Stream 10-based `virt-launcher` image with el10nv RPMs for libvirt and QEMU that include the backported device patches needed for these platforms.
 
-| Component | Repository | Summary |
-| :-------- | :--------- | :------ |
-| **kubevirt-aie virt-launcher** | This repo | CentOS Stream 10-based `virt-launcher` with el10nv RPMs for libvirt and QEMU |
-| **AIE webhook** | [kubevirt-aie-webhook](https://github.com/kubevirt/kubevirt-aie-webhook) | Mutating admission webhook that replaces the launcher image, injects IOMMUFD resource limits, and optionally adds node affinity |
-| **IOMMUFD device plugin** | [iommufd-device-plugin](https://github.com/kubevirt/iommufd-device-plugin) | Kubernetes device plugin that opens and configures `/dev/iommu` on the host and passes the file descriptor to virt-launcher via SCM_RIGHTS |
-| **HCO integration** | [hyperconverged-cluster-operator](https://github.com/kubevirt/hyperconverged-cluster-operator) | HCO operand handlers that deploy and reconcile the webhook and device plugin on OpenShift |
-
-For detailed design documents covering each component, see the [kubevirt-aie-veps](https://github.com/kubevirt/kubevirt-aie-veps) repository.
+For detailed design documents, see the [kubevirt-aie-veps](https://github.com/kubevirt/kubevirt-aie-veps) repository.
 
 ## Rebasing on upstream releases
 
-Manual rebases onto new v1.8.z releases from the upstream [kubevirt/kubevirt `release-1.8`](https://github.com/kubevirt/kubevirt/tree/release-1.8) branch will be performed on this branch. The patch delta is kept intentionally small to minimise rebase friction.
+Manual rebases onto new v1.9.z releases from the upstream [kubevirt/kubevirt `release-1.9`](https://github.com/kubevirt/kubevirt/tree/release-1.9) branch will be performed on this branch. The patch delta is kept intentionally small to minimise rebase friction.
 
 ## What this fork changes
 
-The delta against the upstream `release-1.8` branch is intentionally small:
+The delta against the upstream `release-1.9` branch is intentionally small:
 
 - **NV RPM sync infrastructure** (`hack/sync-nv-rpms.sh`) -- Automated discovery and download of el10nv RPMs from CentOS Stream 10 koji
 - **WORKSPACE and rpm/BUILD.bazel updates** -- Bazel build definitions for the el10nv RPM packages
@@ -81,7 +75,7 @@ DOCKER_PREFIX=quay.io/myorg DOCKER_TAG=test-1 hack/push-virt-launcher-pr.sh
 
 ```shell
 DOCKER_PREFIX=quay.io/kubevirt/kubevirt-aie \
-DOCKER_TAG=v1.8.0-aie-nv \
+DOCKER_TAG=v1.9.0-aie-nv \
 BUILD_ARCH=amd64,crossbuild-aarch64 \
 make bazel-push-images
 ```
