@@ -443,7 +443,7 @@ echo "Updated rpm/BUILD.bazel: ${build_count} references updated"
 echo ""
 echo "Updating sandbox hash..."
 
-sandbox_hash=$(sha256sum "${BUILD_FILE}" | head -c 40)
+sandbox_hash=$(sha256sum "${BUILD_FILE}" | head -c 64)
 sed -i "/^[[:blank:]]*sandbox_hash[[:blank:]]*=/s/=.*/=\"${sandbox_hash}\"/" "${SCRIPT_DIR}/bootstrap.sh"
 
 echo "Updated sandbox hash: ${sandbox_hash}"
