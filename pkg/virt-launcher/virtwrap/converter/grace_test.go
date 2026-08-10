@@ -252,7 +252,6 @@ var _ = Describe("Grace domain conversion", func() {
 
 	It("adds SMMUv3, hostdev ACPI, GI NUMA cells, distances, and pcihole64 for one Grace GPU", func() {
 		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
-		fakeRuntime.capabilities["0000:81:00.0"] = gracePCICapabilities{SSIDSize: "20", OAS: "48"}
 		fakeRuntime.giNodes = uint32Range(2, 9)
 		fakeRuntime.addDistances(append([]uint32{0}, fakeRuntime.giNodes...))
 		domainSpec := newGraceConversionDomain(
@@ -270,9 +269,9 @@ var _ = Describe("Grace domain conversion", func() {
 		Expect(domainSpec.Devices.IOMMU[0].Driver.PCIBus).To(Equal(graceExpanderBusIndexes(domainSpec)[0]))
 		Expect(domainSpec.Devices.IOMMU[0].Driver.Accel).To(Equal("on"))
 		Expect(domainSpec.Devices.IOMMU[0].Driver.ATS).To(Equal("on"))
-		Expect(domainSpec.Devices.IOMMU[0].Driver.RIL).To(Equal("off"))
-		Expect(domainSpec.Devices.IOMMU[0].Driver.SSIDSize).To(Equal("20"))
-		Expect(domainSpec.Devices.IOMMU[0].Driver.OAS).To(Equal("48"))
+		Expect(domainSpec.Devices.IOMMU[0].Driver.RIL).To(BeEmpty())
+		Expect(domainSpec.Devices.IOMMU[0].Driver.SSIDSize).To(BeEmpty())
+		Expect(domainSpec.Devices.IOMMU[0].Driver.OAS).To(BeEmpty())
 		Expect(rootPCIController(domainSpec).PCIHole64).To(Equal(&api.PCIHole64{Value: 1073741824, Unit: "KiB"}))
 		Expect(domainSpec.CPU.NUMA.Cells).To(HaveLen(9))
 		Expect(domainSpec.CPU.NUMA.Cells[1].Memory).ToNot(BeNil())
@@ -283,7 +282,7 @@ var _ = Describe("Grace domain conversion", func() {
 		Expect(findGraceSibling(domainSpec.CPU.NUMA.Cells[1].Distances.Siblings, "0").Value).To(Equal(uint64(80)))
 	})
 
-	It("adds default SMMUv3 address capabilities", func() {
+	It("omits OAS/RIL/SSIDSize from SMMU XML (auto-detected by QEMU via QEMU_CAPS_ARM_SMMUV3_ACCEL)", func() {
 		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
 		fakeRuntime.giNodes = uint32Range(2, 9)
 		fakeRuntime.addDistances(append([]uint32{0}, fakeRuntime.giNodes...))
@@ -295,8 +294,11 @@ var _ = Describe("Grace domain conversion", func() {
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.IOMMU).To(HaveLen(1))
-		Expect(domainSpec.Devices.IOMMU[0].Driver.SSIDSize).To(Equal("20"))
-		Expect(domainSpec.Devices.IOMMU[0].Driver.OAS).To(Equal("48"))
+		Expect(domainSpec.Devices.IOMMU[0].Driver.Accel).To(Equal("on"))
+		Expect(domainSpec.Devices.IOMMU[0].Driver.ATS).To(Equal("on"))
+		Expect(domainSpec.Devices.IOMMU[0].Driver.RIL).To(BeEmpty())
+		Expect(domainSpec.Devices.IOMMU[0].Driver.SSIDSize).To(BeEmpty())
+		Expect(domainSpec.Devices.IOMMU[0].Driver.OAS).To(BeEmpty())
 	})
 
 	It("creates an explicit PCIe root controller before placing Grace PCI devices", func() {
