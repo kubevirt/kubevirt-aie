@@ -1631,22 +1631,24 @@ var _ = Describe("Manager", func() {
 
 				domainSpec = &api.DomainSpec{
 					Devices: api.Devices{
-						Memory: &api.MemoryDevice{
-							Model: "virtio-mem",
-							Alias: api.NewUserDefinedAlias("virtio-mem"),
-							Address: &api.Address{
-								Type:     "pci",
-								Domain:   "0x0000",
-								Bus:      "0x02",
-								Slot:     "0x00",
-								Function: "0x0",
-							},
-							Target: &api.MemoryTarget{
-								Node:      "0",
-								Address:   &api.MemoryAddress{Base: "0x100000000"},
-								Size:      size,
-								Requested: requested,
-								Block:     block,
+						MemoryDevices: []api.MemoryDevice{
+							{
+								Model: "virtio-mem",
+								Alias: api.NewUserDefinedAlias("virtio-mem"),
+								Address: &api.Address{
+									Type:     "pci",
+									Domain:   "0x0000",
+									Bus:      "0x02",
+									Slot:     "0x00",
+									Function: "0x0",
+								},
+								Target: &api.MemoryTarget{
+									Node:      "0",
+									Address:   &api.MemoryAddress{Base: "0x100000000"},
+									Size:      size,
+									Requested: requested,
+									Block:     block,
+								},
 							},
 						},
 					},
@@ -1662,9 +1664,11 @@ var _ = Describe("Manager", func() {
 				memoryDevice, err := memory.BuildMemoryDevice(vmi)
 				Expect(err).ToNot(HaveOccurred())
 
-				domainSpec.Devices.Memory.Target.Requested = memoryDevice.Target.Requested
+				virtioMem := findVirtioMemDevice(domainSpec.Devices.MemoryDevices)
+				Expect(virtioMem).ToNot(BeNil())
+				virtioMem.Target.Requested = memoryDevice.Target.Requested
 
-				memoryDeviceXML, err := xml.Marshal(domainSpec.Devices.Memory)
+				memoryDeviceXML, err := xml.Marshal(virtioMem)
 				Expect(err).ToNot(HaveOccurred())
 
 				attachFlags := libvirt.DOMAIN_DEVICE_MODIFY_LIVE

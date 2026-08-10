@@ -258,7 +258,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.HostDevices[0].Driver).To(Equal(&api.HostDevDriver{Iommufd: "yes"}))
@@ -291,7 +291,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.IOMMU).To(HaveLen(1))
@@ -303,6 +303,102 @@ var _ = Describe("Grace domain conversion", func() {
 		Expect(domainSpec.Devices.IOMMU[0].Driver.OAS).To(BeEmpty())
 	})
 
+	It("adds one EGM memory device per GPU targeting the CPU NUMA node", func() {
+		// Two GPUs on socket 0 (host NUMA 0 → guest node 0), sharing /dev/egm4.
+		// One GPU on socket 1 (host NUMA 1 → guest node 1), using /dev/egm5.
+		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
+		fakeRuntime.addGraceGPU("0000:82:00.0", 0, 16*1024*1024*1024)
+		fakeRuntime.addGraceGPU("0000:83:00.0", 1, 16*1024*1024*1024)
+		giNodes := append(append(uint32Range(2, 9), uint32Range(10, 17)...), uint32Range(18, 25)...)
+		fakeRuntime.giNodes = giNodes
+		fakeRuntime.addDistances(append([]uint32{0, 1}, giNodes...))
+		fakeRuntime.egmPaths["0000:81:00.0"] = "/dev/egm4"
+		fakeRuntime.egmPaths["0000:82:00.0"] = "/dev/egm4"
+		fakeRuntime.egmPaths["0000:83:00.0"] = "/dev/egm5"
+		fakeRuntime.egmSizes["/dev/egm4"] = 503316480 // 480 GiB LPDDR5X in KiB
+		fakeRuntime.egmSizes["/dev/egm5"] = 503316480
+
+		// Two-socket domain: guest CPU nodes 0 and 1 map to host NUMA nodes 0 and 1
+		memKiB := uint64(1024)
+		domainSpec := &api.DomainSpec{
+			CPU: api.CPU{NUMA: &api.NUMA{Cells: []api.NUMACell{
+				{ID: "0", CPUs: "0-1", Memory: &memKiB, Unit: "KiB"},
+				{ID: "1", CPUs: "2-3", Memory: &memKiB, Unit: "KiB"},
+			}}},
+			NUMATune: &api.NUMATune{MemNodes: []api.MemNode{
+				{CellID: 0, Mode: "strict", NodeSet: "0"},
+				{CellID: 1, Mode: "strict", NodeSet: "1"},
+			}},
+			Devices: api.Devices{
+				Controllers: []api.Controller{{Type: api.ControllerTypePCI, Index: "0", Model: api.ControllerModelPCIeRoot}},
+				HostDevices: []api.HostDevice{
+					newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
+					newGraceTestHostDevice("gpu-gpu1", api.HostDevicePCI, "0x0000", "0x82", "0x00", "0x0"),
+					newGraceTestHostDevice("gpu-gpu2", api.HostDevicePCI, "0x0000", "0x83", "0x00", "0x0"),
+				},
+			},
+		}
+
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1", "gpu-gpu2"}, true, true)
+
+		Expect(err).ToNot(HaveOccurred())
+		// One EGM device per GPU (not per GI node)
+		Expect(domainSpec.Devices.MemoryDevices).To(HaveLen(3))
+
+		// GPU 0: socket 0 → guest CPU node 0, /dev/egm4
+		Expect(domainSpec.Devices.MemoryDevices[0].Model).To(Equal("egm"))
+		Expect(domainSpec.Devices.MemoryDevices[0].Access).To(Equal("shared"))
+		Expect(domainSpec.Devices.MemoryDevices[0].Source.Path).To(Equal("/dev/egm4"))
+		Expect(domainSpec.Devices.MemoryDevices[0].Target.Node).To(Equal("0"))
+		Expect(domainSpec.Devices.MemoryDevices[0].Target.PCIDev).To(Equal("ua-gpu-gpu0"))
+		Expect(domainSpec.Devices.MemoryDevices[0].Target.Size.Value).To(Equal(uint64(503316480)))
+
+		// GPU 1: also socket 0 → also targets guest CPU node 0, shares /dev/egm4
+		Expect(domainSpec.Devices.MemoryDevices[1].Source.Path).To(Equal("/dev/egm4"))
+		Expect(domainSpec.Devices.MemoryDevices[1].Target.Node).To(Equal("0"))
+		Expect(domainSpec.Devices.MemoryDevices[1].Target.PCIDev).To(Equal("ua-gpu-gpu1"))
+
+		// GPU 2: socket 1 → guest CPU node 1, /dev/egm5
+		Expect(domainSpec.Devices.MemoryDevices[2].Source.Path).To(Equal("/dev/egm5"))
+		Expect(domainSpec.Devices.MemoryDevices[2].Target.Node).To(Equal("1"))
+		Expect(domainSpec.Devices.MemoryDevices[2].Target.PCIDev).To(Equal("ua-gpu-gpu2"))
+	})
+
+	It("GI NUMA cells remain memoryless when EGM is enabled", func() {
+		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
+		fakeRuntime.giNodes = uint32Range(2, 9)
+		fakeRuntime.addDistances(append([]uint32{0}, fakeRuntime.giNodes...))
+		fakeRuntime.egmPaths["0000:81:00.0"] = "/dev/egm4"
+		fakeRuntime.egmSizes["/dev/egm4"] = 503316480
+		domainSpec := newGraceConversionDomain(
+			newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
+		)
+
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, true)
+
+		Expect(err).ToNot(HaveOccurred())
+		// GI cells (cells 1+) are still memoryless — EGM memory goes to the CPU node
+		giCells := domainSpec.CPU.NUMA.Cells[1:]
+		for _, cell := range giCells {
+			Expect(cell.Memory).ToNot(BeNil())
+			Expect(*cell.Memory).To(Equal(uint64(0)))
+		}
+	})
+
+	It("produces no EGM devices when egmEnabled is false", func() {
+		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
+		fakeRuntime.giNodes = uint32Range(2, 9)
+		fakeRuntime.addDistances(append([]uint32{0}, fakeRuntime.giNodes...))
+		domainSpec := newGraceConversionDomain(
+			newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
+		)
+
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(domainSpec.Devices.MemoryDevices).To(BeEmpty())
+	})
+
 	It("creates an explicit PCIe root controller before placing Grace PCI devices", func() {
 		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
 		fakeRuntime.giNodes = uint32Range(2, 9)
@@ -312,7 +408,7 @@ var _ = Describe("Grace domain conversion", func() {
 		)
 		domainSpec.Devices.Controllers = nil
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.Controllers[0]).To(Equal(api.Controller{
@@ -338,7 +434,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu1", api.HostDevicePCI, "0x0000", "0x82", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.IOMMU).To(HaveLen(2))
@@ -362,7 +458,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu3", api.HostDevicePCI, "0x0000", "0x84", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1", "gpu-gpu2", "gpu-gpu3"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1", "gpu-gpu2", "gpu-gpu3"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.IOMMU).To(HaveLen(4))
@@ -386,7 +482,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu1", api.HostDevicePCI, "0x0000", "0x82", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(domainSpec.Devices.HostDevices[0].ACPI.NodeSet).To(Equal("1-8"))
@@ -404,7 +500,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu1", api.HostDevicePCI, "0x0000", "0x82", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("correlated for some but not all Grace hostdevs")))
 	})
@@ -412,7 +508,7 @@ var _ = Describe("Grace domain conversion", func() {
 	It("fails when the IOMMUFD file descriptor is not available", func() {
 		domainSpec := newGraceConversionDomain()
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, false)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, false, false)
 
 		Expect(err).To(MatchError(ContainSubstring("requires an IOMMUFD file descriptor")))
 	})
@@ -421,7 +517,7 @@ var _ = Describe("Grace domain conversion", func() {
 		fakeRuntime.smmuv3 = false
 		domainSpec := newGraceConversionDomain()
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("requires SMMUv3")))
 	})
@@ -433,7 +529,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("requires 8 host Generic Initiator NUMA nodes")))
 	})
@@ -445,7 +541,7 @@ var _ = Describe("Grace domain conversion", func() {
 		)
 		domainSpec.CPU.NUMA = nil
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("requires guest NUMA cells")))
 	})
@@ -457,7 +553,7 @@ var _ = Describe("Grace domain conversion", func() {
 		)
 		domainSpec.NUMATune.MemNodes = nil
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("requires NUMATune memnodes")))
 	})
@@ -471,7 +567,7 @@ var _ = Describe("Grace domain conversion", func() {
 		domainSpec.CPU.NUMA.Cells = append(domainSpec.CPU.NUMA.Cells, api.NUMACell{ID: "1", CPUs: "2-3", Memory: &memoryKiB, Unit: "KiB"})
 		domainSpec.NUMATune.MemNodes = append(domainSpec.NUMATune.MemNodes, api.MemNode{CellID: 1, Mode: "strict", NodeSet: "0"})
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("maps to multiple guest NUMA cells")))
 	})
@@ -483,7 +579,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu0", api.HostDevicePCI, "0x0000", "0x81", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("has no 64-bit prefetchable PCI BARs")))
 	})
@@ -497,7 +593,7 @@ var _ = Describe("Grace domain conversion", func() {
 			newGraceTestHostDevice("gpu-gpu1", api.HostDevicePCI, "0x0000", "0x82", "0x00", "0x0"),
 		)
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0", "gpu-gpu1"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("pcihole64 size overflows")))
 	})
@@ -581,7 +677,7 @@ var _ = Describe("Grace domain conversion", func() {
 		)
 		domainSpec.CPU.NUMA.Cells = append(domainSpec.CPU.NUMA.Cells, api.NUMACell{ID: "99", Memory: &zeroMemoryKiB, Unit: "KiB"})
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).ToNot(HaveOccurred())
 		Expect(numaCellByID(domainSpec, "99").Distances).To(BeNil())
@@ -594,7 +690,7 @@ var _ = Describe("Grace domain conversion", func() {
 		)
 		domainSpec.CPU.NUMA.Cells = append(domainSpec.CPU.NUMA.Cells, api.NUMACell{ID: "99"})
 
-		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true)
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-gpu0"}, true, false)
 
 		Expect(err).To(MatchError(ContainSubstring("requires NUMATune memnode mapping for guest NUMA cell 99")))
 	})
@@ -619,6 +715,8 @@ type fakeGraceRuntimeInfoProvider struct {
 	giNodesByBDF map[string][]uint32
 	distances    map[uint32]map[uint32]uint64
 	smmuv3       bool
+	egmPaths     map[string]string
+	egmSizes     map[string]uint64 // egmPath → size in KiB
 }
 
 func newFakeGraceRuntimeInfoProvider() *fakeGraceRuntimeInfoProvider {
@@ -630,6 +728,8 @@ func newFakeGraceRuntimeInfoProvider() *fakeGraceRuntimeInfoProvider {
 		giNodesByBDF: map[string][]uint32{},
 		distances:    map[uint32]map[uint32]uint64{},
 		smmuv3:       true,
+		egmPaths:     map[string]string{},
+		egmSizes:     map[string]uint64{},
 	}
 }
 
@@ -696,6 +796,14 @@ func (p *fakeGraceRuntimeInfoProvider) NUMADistances(node uint32) (map[uint32]ui
 		return nil, os.ErrNotExist
 	}
 	return distances, nil
+}
+
+func (p *fakeGraceRuntimeInfoProvider) EGMPathForDevice(bdf string) (string, error) {
+	return p.egmPaths[bdf], nil
+}
+
+func (p *fakeGraceRuntimeInfoProvider) EGMSizeKiB(egmPath string) (uint64, error) {
+	return p.egmSizes[egmPath], nil
 }
 
 func newGraceConversionDomain(hostDevices ...api.HostDevice) *api.DomainSpec {

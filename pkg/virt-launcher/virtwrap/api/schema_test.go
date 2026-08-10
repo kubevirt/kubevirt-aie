@@ -565,6 +565,31 @@ var _ = ginkgo.Describe("IOMMU SMMUv3 device", func() {
 			Expect(unmarshalled).To(Equal(*iommuDevice))
 		})
 
+		ginkgo.It("should marshal and unmarshal EGM memory device", func() {
+			memDev := &MemoryDevice{
+				Model:  "egm",
+				Access: "shared",
+				Source: &MemorySource{Path: "/dev/egm4"},
+				Target: &MemoryTarget{
+					Size:   Memory{Value: 62914560, Unit: "KiB"},
+					Node:   "2",
+					PCIDev: "ua-gpu-gpu0",
+				},
+			}
+
+			xmlBytes, err := xml.Marshal(memDev)
+			Expect(err).ToNot(HaveOccurred())
+
+			expectedXML := `<memory model="egm" access="shared"><source><path>/dev/egm4</path></source><target><size unit="KiB">62914560</size><requested unit="">0</requested><current unit="">0</current><node>2</node><block unit="">0</block><pciDev>ua-gpu-gpu0</pciDev></target></memory>`
+			Expect(string(xmlBytes)).To(Equal(expectedXML))
+
+			var unmarshalled MemoryDevice
+			err = xml.Unmarshal(xmlBytes, &unmarshalled)
+			Expect(err).ToNot(HaveOccurred())
+			memDev.XMLName = xml.Name{Local: "memory"}
+			Expect(unmarshalled).To(Equal(*memDev))
+		})
+
 		ginkgo.It("should omit empty driver attributes", func() {
 			iommuDevice := &IOMMUDevice{
 				Model: "smmuv3",

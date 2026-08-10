@@ -387,6 +387,15 @@ func newLibvirtDomainManager(connection cli.Connection, virtShareDir, ephemeralD
 	return &manager, nil
 }
 
+func findVirtioMemDevice(devices []api.MemoryDevice) *api.MemoryDevice {
+	for i := range devices {
+		if devices[i].Model == "virtio-mem" {
+			return &devices[i]
+		}
+	}
+	return nil
+}
+
 func (l *LibvirtDomainManager) UpdateGuestMemory(vmi *v1.VirtualMachineInstance) error {
 	l.domainModifyLock.Lock()
 	defer l.domainModifyLock.Unlock()
@@ -410,10 +419,11 @@ func (l *LibvirtDomainManager) UpdateGuestMemory(vmi *v1.VirtualMachineInstance)
 		return fmt.Errorf("%s: %v", errMsgPrefix, err)
 	}
 
-	if spec.Devices.Memory != nil {
-		spec.Devices.Memory.Target.Requested = memoryDevice.Target.Requested
+	existingVirtioMem := findVirtioMemDevice(spec.Devices.MemoryDevices)
+	if existingVirtioMem != nil {
+		existingVirtioMem.Target.Requested = memoryDevice.Target.Requested
 
-		memoryDeviceXML, err := xml.Marshal(spec.Devices.Memory)
+		memoryDeviceXML, err := xml.Marshal(existingVirtioMem)
 		if err != nil {
 			log.Log.Reason(err).Error("marshalling target virtio-mem failed")
 			return err

@@ -620,46 +620,53 @@ type MemoryAddress struct {
 	Base string `xml:"base,attr"`
 }
 
+type MemorySource struct {
+	Path string `xml:"path,omitempty"`
+}
+
 type MemoryTarget struct {
 	Size      Memory         `xml:"size"`
 	Requested Memory         `xml:"requested"`
 	Current   Memory         `xml:"current"`
 	Node      string         `xml:"node"`
 	Block     Memory         `xml:"block"`
+	PCIDev    string         `xml:"pciDev,omitempty"`
 	Address   *MemoryAddress `xml:"address,omitempty"`
 }
 
 type MemoryDevice struct {
 	XMLName xml.Name      `xml:"memory"`
 	Model   string        `xml:"model,attr"`
+	Access  string        `xml:"access,attr,omitempty"`
+	Source  *MemorySource `xml:"source,omitempty"`
 	Target  *MemoryTarget `xml:"target"`
 	Alias   *Alias        `xml:"alias,omitempty"`
 	Address *Address      `xml:"address,omitempty"`
 }
 
 type Devices struct {
-	Emulator     string             `xml:"emulator,omitempty"`
-	Interfaces   []Interface        `xml:"interface"`
-	Channels     []Channel          `xml:"channel"`
-	HostDevices  []HostDevice       `xml:"hostdev,omitempty"`
-	PanicDevices []PanicDevice      `xml:"panic,omitempty"`
-	Controllers  []Controller       `xml:"controller,omitempty"`
-	Video        []Video            `xml:"video"`
-	Graphics     []Graphics         `xml:"graphics"`
-	Ballooning   *MemBalloon        `xml:"memballoon,omitempty"`
-	Disks        []Disk             `xml:"disk"`
-	Inputs       []Input            `xml:"input"`
-	Serials      []Serial           `xml:"serial"`
-	Consoles     []Console          `xml:"console"`
-	Watchdogs    []Watchdog         `xml:"watchdog,omitempty"`
-	Rng          *Rng               `xml:"rng,omitempty"`
-	Filesystems  []FilesystemDevice `xml:"filesystem,omitempty"`
-	Redirs       []RedirectedDevice `xml:"redirdev,omitempty"`
-	SoundCards   []SoundCard        `xml:"sound,omitempty"`
-	TPMs         []TPM              `xml:"tpm,omitempty"`
-	VSOCK        *VSOCK             `xml:"vsock,omitempty"`
-	Memory       *MemoryDevice      `xml:"memory,omitempty"`
-	IOMMU        []IOMMUDevice      `xml:"iommu,omitempty"`
+	Emulator      string             `xml:"emulator,omitempty"`
+	Interfaces    []Interface        `xml:"interface"`
+	Channels      []Channel          `xml:"channel"`
+	HostDevices   []HostDevice       `xml:"hostdev,omitempty"`
+	PanicDevices  []PanicDevice      `xml:"panic,omitempty"`
+	Controllers   []Controller       `xml:"controller,omitempty"`
+	Video         []Video            `xml:"video"`
+	Graphics      []Graphics         `xml:"graphics"`
+	Ballooning    *MemBalloon        `xml:"memballoon,omitempty"`
+	Disks         []Disk             `xml:"disk"`
+	Inputs        []Input            `xml:"input"`
+	Serials       []Serial           `xml:"serial"`
+	Consoles      []Console          `xml:"console"`
+	Watchdogs     []Watchdog         `xml:"watchdog,omitempty"`
+	Rng           *Rng               `xml:"rng,omitempty"`
+	Filesystems   []FilesystemDevice `xml:"filesystem,omitempty"`
+	Redirs        []RedirectedDevice `xml:"redirdev,omitempty"`
+	SoundCards    []SoundCard        `xml:"sound,omitempty"`
+	TPMs          []TPM              `xml:"tpm,omitempty"`
+	VSOCK         *VSOCK             `xml:"vsock,omitempty"`
+	MemoryDevices []MemoryDevice     `xml:"memory,omitempty"`
+	IOMMU         []IOMMUDevice      `xml:"iommu,omitempty"`
 }
 
 type PanicDevice struct {

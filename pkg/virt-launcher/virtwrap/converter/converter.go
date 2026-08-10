@@ -1195,7 +1195,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		}
 
 		if graceIOVirtualizationRequested(c) {
-			return configureGraceIOVirtualization(&domain.Spec, c.GraceHostDeviceAliases, c.IOMMUFDEnabled)
+			return configureGraceIOVirtualization(&domain.Spec, c.GraceHostDeviceAliases, c.IOMMUFDEnabled, vmi.Annotations["kubevirt.io/egm"] == "true")
 		}
 
 		if c.PCINUMAAwareTopologyEnabled {

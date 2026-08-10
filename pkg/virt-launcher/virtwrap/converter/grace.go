@@ -30,6 +30,8 @@ import (
 	"strconv"
 	"strings"
 
+	"kubevirt.io/client-go/log"
+
 	"kubevirt.io/kubevirt/pkg/util/hardware"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
@@ -38,6 +40,7 @@ const (
 	sysfsPCIDevicesPath = "/sys/bus/pci/devices"
 	sysfsNodePath       = "/sys/devices/system/node"
 	sysfsIOMMUClassPath = "/sys/class/iommu"
+	sysfsEGMClassPath   = "/sys/class/egm"
 
 	graceGINodesPerGPU       = 8
 	gracePCIHole64MarginKiB  = uint64(1024 * 1024)
@@ -73,6 +76,7 @@ type graceHostDeviceConversion struct {
 	hostGINodes   []uint32
 	capabilities  gracePCICapabilities
 	pciHoleBytes  uint64
+	egmPath       string // empty if EGM not available or not requested
 }
 
 type gracePCICapabilities struct {
@@ -93,21 +97,25 @@ type graceRuntimeInfoProvider interface {
 	GuestInitiatorHostNodes() ([]uint32, error)
 	GuestInitiatorHostNodesForDevice(bdf string) ([]uint32, error)
 	NUMADistances(node uint32) (map[uint32]uint64, error)
+	EGMPathForDevice(bdf string) (string, error)
+	EGMSizeKiB(egmPath string) (uint64, error)
 }
 
 type sysfsGraceRuntimeInfoProvider struct {
 	pciDevicesPath string
 	nodePath       string
 	iommuClassPath string
+	egmClassPath   string
 }
 
 var graceRuntimeInfo graceRuntimeInfoProvider = sysfsGraceRuntimeInfoProvider{
 	pciDevicesPath: sysfsPCIDevicesPath,
 	nodePath:       sysfsNodePath,
 	iommuClassPath: sysfsIOMMUClassPath,
+	egmClassPath:   sysfsEGMClassPath,
 }
 
-func configureGraceIOVirtualization(domainSpec *api.DomainSpec, expectedAliases []string, iommufdAvailable bool) error {
+func configureGraceIOVirtualization(domainSpec *api.DomainSpec, expectedAliases []string, iommufdAvailable bool, egmEnabled bool) error {
 	if len(expectedAliases) == 0 {
 		return nil
 	}
@@ -131,7 +139,7 @@ func configureGraceIOVirtualization(domainSpec *api.DomainSpec, expectedAliases 
 		return nil
 	}
 
-	conversionDevices, guestToHostNUMA, pciHoleBytes, err := prepareGraceHostDevices(domainSpec, verifiedDevices)
+	conversionDevices, guestToHostNUMA, pciHoleBytes, err := prepareGraceHostDevices(domainSpec, verifiedDevices, egmEnabled)
 	if err != nil {
 		return err
 	}
@@ -141,6 +149,7 @@ func configureGraceIOVirtualization(domainSpec *api.DomainSpec, expectedAliases 
 	if err := placePCIDevicesWithGraceIOVirtualization(domainSpec, conversionDevices); err != nil {
 		return err
 	}
+	appendGraceEGMMemoryDevices(domainSpec, conversionDevices)
 	if err := applyGracePCIHole64(domainSpec, pciHoleBytes); err != nil {
 		return err
 	}
@@ -229,7 +238,7 @@ func verifyGraceHostDevice(hostDevice *api.HostDevice, alias string) (verifiedGr
 	}, nil
 }
 
-func prepareGraceHostDevices(domainSpec *api.DomainSpec, verifiedDevices []verifiedGraceHostDevice) ([]graceHostDeviceConversion, map[uint32]uint32, uint64, error) {
+func prepareGraceHostDevices(domainSpec *api.DomainSpec, verifiedDevices []verifiedGraceHostDevice, egmEnabled bool) ([]graceHostDeviceConversion, map[uint32]uint32, uint64, error) {
 	guestToHostNUMA, err := cpuGuestToHostNUMAMap(domainSpec)
 	if err != nil {
 		return nil, nil, 0, err
@@ -307,6 +316,14 @@ func prepareGraceHostDevices(domainSpec *api.DomainSpec, verifiedDevices []verif
 			guestToHostNUMA[guestNode] = hostGINodes[giIndex]
 		}
 
+		var egmPath string
+		if egmEnabled {
+			egmPath, err = graceRuntimeInfo.EGMPathForDevice(verifiedDevice.SourceAddress)
+			if err != nil {
+				return nil, nil, 0, fmt.Errorf("failed to discover EGM path for Grace hostdev %q at %s: %w", verifiedDevice.Alias, verifiedDevice.SourceAddress, err)
+			}
+		}
+
 		verifiedDevice.HostDevice.Driver = &api.HostDevDriver{Iommufd: graceHostDeviceIOMMUFDOn}
 		verifiedDevice.HostDevice.ACPI = &api.ACPIHostDev{NodeSet: formatNUMANodeSet(guestGINodes)}
 		appendGraceGINUMACells(domainSpec, guestGINodes)
@@ -318,6 +335,7 @@ func prepareGraceHostDevices(domainSpec *api.DomainSpec, verifiedDevices []verif
 			hostGINodes:             hostGINodes,
 			capabilities:            capabilities,
 			pciHoleBytes:            pciHoleBytes,
+			egmPath:                 egmPath,
 		})
 	}
 	return conversionDevices, guestToHostNUMA, totalPCIHoleBytes, nil
@@ -406,6 +424,33 @@ func placePCIDevicesWithGraceIOVirtualization(domainSpec *api.DomainSpec, graceD
 
 	assigner := newExpanderBusAssignerWithOptions(domainSpec, isolatedDevices, numaOverrides)
 	return assigner.PlaceNumaAlignedDevices()
+}
+
+func appendGraceEGMMemoryDevices(domainSpec *api.DomainSpec, graceDevices []graceHostDeviceConversion) {
+	// One EGM memory device per GPU, targeting the guest CPU NUMA node co-located
+	// with that GPU's socket. Multiple GPUs on the same socket share the same
+	// /dev/egmN path but each gets its own <memory model='egm'> entry with a
+	// separate pciDev reference. The LPDDR5X region size is read from the sysfs
+	// attribute exposed by the nvgrace-egm driver.
+	for _, dev := range graceDevices {
+		if dev.egmPath == "" {
+			continue
+		}
+		sizeKiB, err := graceRuntimeInfo.EGMSizeKiB(dev.egmPath)
+		if err != nil {
+			log.Log.Warningf("failed to read EGM size for %s (hostdev %q): %v — using 0", dev.egmPath, dev.Alias, err)
+		}
+		domainSpec.Devices.MemoryDevices = append(domainSpec.Devices.MemoryDevices, api.MemoryDevice{
+			Model:  "egm",
+			Access: "shared",
+			Source: &api.MemorySource{Path: dev.egmPath},
+			Target: &api.MemoryTarget{
+				Size:   api.Memory{Value: sizeKiB, Unit: "KiB"},
+				Node:   strconv.FormatUint(uint64(dev.guestNUMANode), 10),
+				PCIDev: "ua-" + dev.Alias,
+			},
+		})
+	}
 }
 
 func cpuGuestToHostNUMAMap(domainSpec *api.DomainSpec) (map[uint32]uint32, error) {
@@ -741,6 +786,44 @@ func (p sysfsGraceRuntimeInfoProvider) PCIHole64SizeBytes(bdf string) (uint64, e
 
 func (p sysfsGraceRuntimeInfoProvider) PCICapabilities(_ string) (gracePCICapabilities, error) {
 	return gracePCICapabilities{}, nil
+}
+
+func (p sysfsGraceRuntimeInfoProvider) EGMPathForDevice(bdf string) (string, error) {
+	entries, err := os.ReadDir(p.egmClassPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	for _, entry := range entries {
+		gpuDevicesPath := filepath.Join(p.egmClassPath, entry.Name(), "gpu_devices")
+		data, err := os.ReadFile(gpuDevicesPath)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if strings.TrimSpace(line) == bdf {
+				return filepath.Join("/dev", entry.Name()), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func (p sysfsGraceRuntimeInfoProvider) EGMSizeKiB(egmPath string) (uint64, error) {
+	// The nvgrace-egm driver exposes the EGM region size (in bytes) via
+	// /sys/class/egm/<name>/size. Convert to KiB for the libvirt target element.
+	name := filepath.Base(egmPath)
+	sizeStr, err := readSysfsValue(filepath.Join(p.egmClassPath, name, "size"))
+	if err != nil {
+		return 0, err
+	}
+	sizeBytes, err := strconv.ParseUint(strings.TrimSpace(sizeStr), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing EGM size for %s: %w", egmPath, err)
+	}
+	return sizeBytes / 1024, nil
 }
 
 func (p sysfsGraceRuntimeInfoProvider) GuestInitiatorHostNodes() ([]uint32, error) {
