@@ -53,6 +53,7 @@ const (
 
 	graceDefaultIOMMUAccel   = "on"
 	graceDefaultIOMMUATS     = "on"
+	graceDefaultIOMMUCMDQV   = "on"
 	graceSMMUv3IOMMUModel    = "smmuv3"
 	graceHostDeviceIOMMUFDOn = "yes"
 )
@@ -80,6 +81,7 @@ type gracePCICapabilities struct {
 	RIL      string
 	SSIDSize string
 	OAS      string
+	CMDQV    string
 }
 
 type graceRuntimeInfoProvider interface {
@@ -393,11 +395,9 @@ func placePCIDevicesWithGraceIOVirtualization(domainSpec *api.DomainSpec, graceD
 		iommuDevice := &api.IOMMUDevice{
 			Model: graceSMMUv3IOMMUModel,
 			Driver: &api.IOMMUDriver{
-				Accel:    graceDevice.capabilities.Accel,
-				ATS:      graceDevice.capabilities.ATS,
-				RIL:      graceDevice.capabilities.RIL,
-				SSIDSize: graceDevice.capabilities.SSIDSize,
-				OAS:      graceDevice.capabilities.OAS,
+				Accel: graceDevice.capabilities.Accel,
+				ATS:   graceDevice.capabilities.ATS,
+				CMDQV: graceDevice.capabilities.CMDQV,
 			},
 		}
 		isolatedDevices[graceDevice.SourceAddress] = iommuDevice
@@ -643,6 +643,9 @@ func (capabilities gracePCICapabilities) withDefaults() gracePCICapabilities {
 	}
 	if capabilities.ATS == "" {
 		capabilities.ATS = graceDefaultIOMMUATS
+	}
+	if capabilities.CMDQV == "" {
+		capabilities.CMDQV = graceDefaultIOMMUCMDQV
 	}
 	// OAS, RIL, and SSIDSize are intentionally omitted: QEMU 10.1.0+ with
 	// QEMU_CAPS_ARM_SMMUV3_ACCEL probes these from the host SMMUv3 hardware
