@@ -825,6 +825,7 @@ type IOMMUDriver struct {
 	RIL      string `xml:"ril,attr,omitempty"`
 	SSIDSize string `xml:"ssidSize,attr,omitempty"`
 	OAS      string `xml:"oas,attr,omitempty"`
+	CMDQV    string `xml:"cmdqv,attr,omitempty"`
 }
 
 // END IOMMU -----------------------------
