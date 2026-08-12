@@ -10073,6 +10073,22 @@ rpm(
 )
 
 rpm(
+    name = "libwsman1-0__2.8.1-3.el10.aarch64",
+    sha256 = "be19f26c5caf0c90cbd564d1c159ca16bda32e5cb605c76e285ee8baeaa07592",
+    urls = [
+        "https://mirror.stream.centos.org/10-stream/AppStream/aarch64/os/Packages/libwsman1-2.8.1-3.el10.aarch64.rpm",
+    ],
+)
+
+rpm(
+    name = "libwsman1-0__2.8.1-3.el10.x86_64",
+    sha256 = "e4464a739999e998c4a42dc5782b786c0cdeac455546deb50cae0a0916eb89bb",
+    urls = [
+        "https://mirror.stream.centos.org/10-stream/AppStream/x86_64/os/Packages/libwsman1-2.8.1-3.el10.x86_64.rpm",
+    ],
+)
+
+rpm(
     name = "libxcrypt-0__4.4.18-3.el9.aarch64",
     sha256 = "f697d91abb19e9be9b69b8836a802711d2cf7989af27a4e1ba261f35ce53b8b5",
     urls = [
