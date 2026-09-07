@@ -26,12 +26,16 @@ const (
 	nvidiaGraceGPUDeviceID2342 = "2342"
 	nvidiaGraceGPUDeviceID2348 = "2348"
 	nvidiaGraceGPUDeviceID2941 = "2941"
+	// Vera Rubin (VR). Like Grace-Hopper/GB200 it is a coherent C2C GPU and
+	// requires the enlarged 64-bit PCI hole for its large prefetchable BARs.
+	nvidiaVeraGPUDeviceID3041 = "3041"
 )
 
 var nvidiaGraceGPUDeviceIDs = map[string]struct{}{
 	nvidiaGraceGPUDeviceID2342: {},
 	nvidiaGraceGPUDeviceID2348: {},
 	nvidiaGraceGPUDeviceID2941: {},
+	nvidiaVeraGPUDeviceID3041:  {},
 }
 
 type PCIVendorSelector struct {
