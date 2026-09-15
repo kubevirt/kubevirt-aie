@@ -8420,28 +8420,19 @@ rpm(
 rpm(
     name = "libsss_idmap-0__2.12.0-1.el10.aarch64",
     sha256 = "5d56064a3fe65a8eb6b9e02b239587bc9a3e132a947d836c5edf4f02d538fd03",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/aarch64/os/Packages/libsss_idmap-2.12.0-1.el10.aarch64.rpm",
-        "https://storage.googleapis.com/builddeps/5d56064a3fe65a8eb6b9e02b239587bc9a3e132a947d836c5edf4f02d538fd03",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/5d56064a3fe65a8eb6b9e02b239587bc9a3e132a947d836c5edf4f02d538fd03"],
 )
 
 rpm(
     name = "libsss_idmap-0__2.12.0-1.el10.s390x",
     sha256 = "573803676a86b4f7d8ed234ce70c8a40412249a4bdbd8256c4fac09fb52eb2c9",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/s390x/os/Packages/libsss_idmap-2.12.0-1.el10.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/573803676a86b4f7d8ed234ce70c8a40412249a4bdbd8256c4fac09fb52eb2c9",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/573803676a86b4f7d8ed234ce70c8a40412249a4bdbd8256c4fac09fb52eb2c9"],
 )
 
 rpm(
     name = "libsss_idmap-0__2.12.0-1.el10.x86_64",
     sha256 = "fbfda0b5f6b73eb4b75196370ea91361afb736e08212f291f6c5328ecab401de",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/Packages/libsss_idmap-2.12.0-1.el10.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/fbfda0b5f6b73eb4b75196370ea91361afb736e08212f291f6c5328ecab401de",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/fbfda0b5f6b73eb4b75196370ea91361afb736e08212f291f6c5328ecab401de"],
 )
 
 rpm(
@@ -8474,28 +8465,19 @@ rpm(
 rpm(
     name = "libsss_nss_idmap-0__2.12.0-1.el10.aarch64",
     sha256 = "fff9355f09c72d9e9f6eddf6a9b5ae5d91d03d34c9e09acd4790af60ef7e2fb5",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/aarch64/os/Packages/libsss_nss_idmap-2.12.0-1.el10.aarch64.rpm",
-        "https://storage.googleapis.com/builddeps/fff9355f09c72d9e9f6eddf6a9b5ae5d91d03d34c9e09acd4790af60ef7e2fb5",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/fff9355f09c72d9e9f6eddf6a9b5ae5d91d03d34c9e09acd4790af60ef7e2fb5"],
 )
 
 rpm(
     name = "libsss_nss_idmap-0__2.12.0-1.el10.s390x",
     sha256 = "cd8c9d8edca4e2658839230d7afd66c8e5c52c782169eb1cd1354b8683f9d606",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/s390x/os/Packages/libsss_nss_idmap-2.12.0-1.el10.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/cd8c9d8edca4e2658839230d7afd66c8e5c52c782169eb1cd1354b8683f9d606",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/cd8c9d8edca4e2658839230d7afd66c8e5c52c782169eb1cd1354b8683f9d606"],
 )
 
 rpm(
     name = "libsss_nss_idmap-0__2.12.0-1.el10.x86_64",
     sha256 = "690e064654f7f3ede0eed89565408970258329a37580c61ee04872a64c489b32",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/Packages/libsss_nss_idmap-2.12.0-1.el10.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/690e064654f7f3ede0eed89565408970258329a37580c61ee04872a64c489b32",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/690e064654f7f3ede0eed89565408970258329a37580c61ee04872a64c489b32"],
 )
 
 rpm(
@@ -14147,28 +14129,19 @@ rpm(
 rpm(
     name = "sssd-client-0__2.12.0-1.el10.aarch64",
     sha256 = "38b0c51913fee7468a2e585c2e9ae811cbcd682ac266f3681da43dcd223d7718",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/aarch64/os/Packages/sssd-client-2.12.0-1.el10.aarch64.rpm",
-        "https://storage.googleapis.com/builddeps/38b0c51913fee7468a2e585c2e9ae811cbcd682ac266f3681da43dcd223d7718",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/38b0c51913fee7468a2e585c2e9ae811cbcd682ac266f3681da43dcd223d7718"],
 )
 
 rpm(
     name = "sssd-client-0__2.12.0-1.el10.s390x",
     sha256 = "a7455c34c936bd13af3360275301ad413fc246e65a969cc32b3fb1b25c7870c0",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/s390x/os/Packages/sssd-client-2.12.0-1.el10.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/a7455c34c936bd13af3360275301ad413fc246e65a969cc32b3fb1b25c7870c0",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/a7455c34c936bd13af3360275301ad413fc246e65a969cc32b3fb1b25c7870c0"],
 )
 
 rpm(
     name = "sssd-client-0__2.12.0-1.el10.x86_64",
     sha256 = "83b0d541eaed2737ab42036d731df94094458b6f0fa39db2e23391b947d59ff0",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/Packages/sssd-client-2.12.0-1.el10.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/83b0d541eaed2737ab42036d731df94094458b6f0fa39db2e23391b947d59ff0",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/83b0d541eaed2737ab42036d731df94094458b6f0fa39db2e23391b947d59ff0"],
 )
 
 rpm(
