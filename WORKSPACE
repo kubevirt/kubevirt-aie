@@ -4265,19 +4265,13 @@ rpm(
 rpm(
     name = "guestfs-tools-0__1.54.0-7.el10.s390x",
     sha256 = "a8afff6d24bfb91072d2a0c98ad7d574ac5840da0f5a97e92b717862f8f28492",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/AppStream/s390x/os/Packages/guestfs-tools-1.54.0-7.el10.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/a8afff6d24bfb91072d2a0c98ad7d574ac5840da0f5a97e92b717862f8f28492",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/a8afff6d24bfb91072d2a0c98ad7d574ac5840da0f5a97e92b717862f8f28492"],
 )
 
 rpm(
     name = "guestfs-tools-0__1.54.0-7.el10.x86_64",
     sha256 = "8e050750f08fbb8a0fd2b0600e8d3acd966e74155bccafe0cd6eb0aaf9d087a3",
-    urls = [
-        "http://mirror.stream.centos.org/10-stream/AppStream/x86_64/os/Packages/guestfs-tools-1.54.0-7.el10.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/8e050750f08fbb8a0fd2b0600e8d3acd966e74155bccafe0cd6eb0aaf9d087a3",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/8e050750f08fbb8a0fd2b0600e8d3acd966e74155bccafe0cd6eb0aaf9d087a3"],
 )
 
 rpm(
