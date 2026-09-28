@@ -90,6 +90,9 @@ type graceRuntimeInfoProvider interface {
 	PCINUMANode(bdf string) (uint32, error)
 	PCIHole64SizeBytes(bdf string) (uint64, error)
 	PCICapabilities(bdf string) (gracePCICapabilities, error)
+	// IsVirtualFunction returns true if the PCI device at bdf is an SR-IOV VF,
+	// detected by the presence of a physfn symlink in its sysfs directory.
+	IsVirtualFunction(bdf string) bool
 	GuestInitiatorHostNodes() ([]uint32, error)
 	GuestInitiatorHostNodesForDevice(bdf string) ([]uint32, error)
 	NUMADistances(node uint32) (map[uint32]uint64, error)
@@ -131,9 +134,29 @@ func configureGraceIOVirtualization(domainSpec *api.DomainSpec, expectedAliases 
 		return nil
 	}
 
+	// SR-IOV VFs share the same Grace GPU PCI device ID (10de:2941) as their PF
+	// and pass verifyGraceHostDevices. They go through the full Grace path to get
+	// the correct GI NUMA topology, SMMUv3, and iommufd='yes' on the hostdev
+	// (matching the reference libvirt XML for vGPU on Grace hardware).
+	// The domain-level IOMMUFD object is cleared when VFs are present: with
+	// <iommufd/> in the domain, libvirt/QEMU wires VF hostdevs to the
+	// QEMU-managed iommufd backend, which breaks MSI-X interrupt remapping for
+	// nvidia_vgpu_vfio. Without the domain-level object, iommufd='yes' on the
+	// hostdev uses the direct /dev/iommu path instead.
+	hasVFs := false
+	for _, d := range verifiedDevices {
+		if graceRuntimeInfo.IsVirtualFunction(d.SourceAddress) {
+			hasVFs = true
+			break
+		}
+	}
+
 	conversionDevices, guestToHostNUMA, pciHoleBytes, err := prepareGraceHostDevices(domainSpec, verifiedDevices)
 	if err != nil {
 		return err
+	}
+	if hasVFs {
+		domainSpec.IOMMUFD = nil
 	}
 	if _, err := ensureGracePCIeRootController(domainSpec); err != nil {
 		return err
@@ -321,6 +344,52 @@ func prepareGraceHostDevices(domainSpec *api.DomainSpec, verifiedDevices []verif
 		})
 	}
 	return conversionDevices, guestToHostNUMA, totalPCIHoleBytes, nil
+}
+
+// prepareGraceVFNUMADevices sets up the GI NUMA topology for SR-IOV VFs without
+// applying IOMMUFD, SMMUv3, or PCIe bus remapping. This gives the vGPU guest driver
+// the NUMA node information it needs (e.g. kmemsysSetupCoherentCpuLink) while keeping
+// the VF on the standard VFIO-group assignment path.
+func prepareGraceVFNUMADevices(domainSpec *api.DomainSpec, vfDevices []verifiedGraceHostDevice) (map[uint32]uint32, error) {
+	giHostNodesByDevice, giNodesCorrelated, err := graceHostGINodesByDevice(vfDevices)
+	if err != nil {
+		return nil, err
+	}
+
+	var giHostNodes []uint32
+	if !giNodesCorrelated {
+		giHostNodes, err = graceRuntimeInfo.GuestInitiatorHostNodes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover Grace Generic Initiator NUMA nodes for vGPU VFs: %w", err)
+		}
+		requiredGINodes := len(vfDevices) * graceGINodesPerGPU
+		if len(giHostNodes) < requiredGINodes {
+			return nil, fmt.Errorf("GraceIOVirtualization requires %d host Generic Initiator NUMA nodes for %d vGPU VF(s), found %d", requiredGINodes, len(vfDevices), len(giHostNodes))
+		}
+	}
+
+	nextGuestCellID, err := nextNUMACellID(domainSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	guestToHostNUMA := map[uint32]uint32{}
+	for index, vfDevice := range vfDevices {
+		guestGINodes := allocateGuestGINodes(nextGuestCellID, graceGINodesPerGPU)
+		nextGuestCellID += uint32(graceGINodesPerGPU)
+		var hostGINodes []uint32
+		if giNodesCorrelated {
+			hostGINodes = giHostNodesByDevice[vfDevice.SourceAddress]
+		} else {
+			hostGINodes = giHostNodes[index*graceGINodesPerGPU : (index+1)*graceGINodesPerGPU]
+		}
+		for giIndex, guestNode := range guestGINodes {
+			guestToHostNUMA[guestNode] = hostGINodes[giIndex]
+		}
+		appendGraceGINUMACells(domainSpec, guestGINodes)
+		vfDevice.HostDevice.ACPI = &api.ACPIHostDev{NodeSet: formatNUMANodeSet(guestGINodes)}
+	}
+	return guestToHostNUMA, nil
 }
 
 func gracePCIHole64SizeBytes(verifiedDevice verifiedGraceHostDevice, barBytes uint64) uint64 {
@@ -739,8 +808,14 @@ func (p sysfsGraceRuntimeInfoProvider) PCIHole64SizeBytes(bdf string) (uint64, e
 	return total, nil
 }
 
-func (p sysfsGraceRuntimeInfoProvider) PCICapabilities(_ string) (gracePCICapabilities, error) {
+func (p sysfsGraceRuntimeInfoProvider) PCICapabilities(bdf string) (gracePCICapabilities, error) {
 	return gracePCICapabilities{}, nil
+}
+
+func (p sysfsGraceRuntimeInfoProvider) IsVirtualFunction(bdf string) bool {
+	// SR-IOV VFs have a physfn symlink pointing to their Physical Function.
+	_, err := os.Lstat(filepath.Join(p.pciDevicesPath, bdf, "physfn"))
+	return err == nil
 }
 
 func (p sysfsGraceRuntimeInfoProvider) GuestInitiatorHostNodes() ([]uint32, error) {

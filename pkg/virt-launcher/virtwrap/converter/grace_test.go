@@ -426,6 +426,26 @@ var _ = Describe("Grace domain conversion", func() {
 		Expect(err).To(MatchError(ContainSubstring("requires SMMUv3")))
 	})
 
+	It("clears domain IOMMUFD while running the full Grace path for VF-only VMIs", func() {
+		// VF goes through prepareGraceHostDevices so needs pciIDs, numaNode, pciHole, and GI nodes
+		fakeRuntime.pciIDs["0000:09:00.2"] = [2]string{"0x10de", "0x2941"}
+		fakeRuntime.numaNodes["0000:09:00.2"] = 0
+		fakeRuntime.pciHoleBytes["0000:09:00.2"] = 16 * 1024 * 1024 * 1024
+		fakeRuntime.virtualFunctions["0000:09:00.2"] = true
+		fakeRuntime.giNodes = uint32Range(2, 9)
+		fakeRuntime.addDistances(append([]uint32{0}, fakeRuntime.giNodes...))
+		domainSpec := newGraceConversionDomain(
+			newGraceTestHostDevice("gpu-vf0", api.HostDevicePCI, "0x0000", "0x09", "0x00", "0x2"),
+		)
+		domainSpec.IOMMUFD = &api.IOMMUFD{Enabled: "yes", FDGroup: "iommu"}
+
+		err := configureGraceIOVirtualization(domainSpec, []string{"gpu-vf0"}, true)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(domainSpec.IOMMUFD).To(BeNil(), "domain IOMMUFD must be cleared when VFs are present")
+		Expect(domainSpec.CPU.NUMA.Cells).To(HaveLen(1+graceGINodesPerGPU), "GI NUMA cells must be wired via the full Grace path")
+	})
+
 	It("fails when there are not enough host Generic Initiator NUMA nodes", func() {
 		fakeRuntime.addGraceGPU("0000:81:00.0", 0, 16*1024*1024*1024)
 		fakeRuntime.giNodes = uint32Range(2, 4)
@@ -611,25 +631,27 @@ var _ = Describe("Grace domain conversion", func() {
 })
 
 type fakeGraceRuntimeInfoProvider struct {
-	pciIDs       map[string][2]string
-	numaNodes    map[string]uint32
-	pciHoleBytes map[string]uint64
-	capabilities map[string]gracePCICapabilities
-	giNodes      []uint32
-	giNodesByBDF map[string][]uint32
-	distances    map[uint32]map[uint32]uint64
-	smmuv3       bool
+	pciIDs           map[string][2]string
+	numaNodes        map[string]uint32
+	pciHoleBytes     map[string]uint64
+	capabilities     map[string]gracePCICapabilities
+	giNodes          []uint32
+	giNodesByBDF     map[string][]uint32
+	distances        map[uint32]map[uint32]uint64
+	smmuv3           bool
+	virtualFunctions map[string]bool
 }
 
 func newFakeGraceRuntimeInfoProvider() *fakeGraceRuntimeInfoProvider {
 	return &fakeGraceRuntimeInfoProvider{
-		pciIDs:       map[string][2]string{},
-		numaNodes:    map[string]uint32{},
-		pciHoleBytes: map[string]uint64{},
-		capabilities: map[string]gracePCICapabilities{},
-		giNodesByBDF: map[string][]uint32{},
-		distances:    map[uint32]map[uint32]uint64{},
-		smmuv3:       true,
+		pciIDs:           map[string][2]string{},
+		numaNodes:        map[string]uint32{},
+		pciHoleBytes:     map[string]uint64{},
+		capabilities:     map[string]gracePCICapabilities{},
+		giNodesByBDF:     map[string][]uint32{},
+		distances:        map[uint32]map[uint32]uint64{},
+		smmuv3:           true,
+		virtualFunctions: map[string]bool{},
 	}
 }
 
@@ -680,6 +702,10 @@ func (p *fakeGraceRuntimeInfoProvider) PCIHole64SizeBytes(bdf string) (uint64, e
 
 func (p *fakeGraceRuntimeInfoProvider) PCICapabilities(bdf string) (gracePCICapabilities, error) {
 	return p.capabilities[bdf], nil
+}
+
+func (p *fakeGraceRuntimeInfoProvider) IsVirtualFunction(bdf string) bool {
+	return p.virtualFunctions[bdf]
 }
 
 func (p *fakeGraceRuntimeInfoProvider) GuestInitiatorHostNodes() ([]uint32, error) {
