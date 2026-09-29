@@ -111,7 +111,12 @@ function _bind_gpus_to_vfio() {
 
 function up() {
   _load_grace_modules
-  _bind_gpus_to_vfio
+  # Skip GPU→vfio binding in vGPU mode — the vGPU manager (nvidia_vgpu_vfio)
+  # owns the PFs and creates SR-IOV VFs. Binding PFs to nvgrace_gpu_vfio_pci
+  # would destroy the VF setup.
+  if [ "${KUBEVIRT_GPU_MODE:-}" != "vgpu" ]; then
+    _bind_gpus_to_vfio
+  fi
 
   echo 'Discovering NVIDIA GPUs for Grace passthrough...'
   lspci -d 10de: -nn || true
