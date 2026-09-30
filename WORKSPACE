@@ -3962,28 +3962,19 @@ rpm(
 rpm(
     name = "gnutls-0__3.8.10-3.el9.aarch64",
     sha256 = "4b9e4757f999a9995f53e49577b9b3f3a5e0d683a227015c357e6d5603a87982",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/BaseOS/aarch64/os/Packages/gnutls-3.8.10-3.el9.aarch64.rpm",
-        "https://storage.googleapis.com/builddeps/4b9e4757f999a9995f53e49577b9b3f3a5e0d683a227015c357e6d5603a87982",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/4b9e4757f999a9995f53e49577b9b3f3a5e0d683a227015c357e6d5603a87982"],
 )
 
 rpm(
     name = "gnutls-0__3.8.10-3.el9.s390x",
     sha256 = "3d2808eadf410398ae827793fcc526af2bcc1e24a2551d33e61e1293786f1fb6",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/BaseOS/s390x/os/Packages/gnutls-3.8.10-3.el9.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/3d2808eadf410398ae827793fcc526af2bcc1e24a2551d33e61e1293786f1fb6",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/3d2808eadf410398ae827793fcc526af2bcc1e24a2551d33e61e1293786f1fb6"],
 )
 
 rpm(
     name = "gnutls-0__3.8.10-3.el9.x86_64",
     sha256 = "95b8f11db2d075d96817bad2ca9b131b78ad2836edc5a75f99f967c30249b1e7",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/Packages/gnutls-3.8.10-3.el9.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/95b8f11db2d075d96817bad2ca9b131b78ad2836edc5a75f99f967c30249b1e7",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/95b8f11db2d075d96817bad2ca9b131b78ad2836edc5a75f99f967c30249b1e7"],
 )
 
 rpm(
@@ -4022,28 +4013,19 @@ rpm(
 rpm(
     name = "gnutls-dane-0__3.8.10-3.el9.aarch64",
     sha256 = "a41c588fc3f4d6c3686f872f493ba32b61a46cfd0cb8f0c7458d9f62e7b7c22a",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/AppStream/aarch64/os/Packages/gnutls-dane-3.8.10-3.el9.aarch64.rpm",
-        "https://storage.googleapis.com/builddeps/a41c588fc3f4d6c3686f872f493ba32b61a46cfd0cb8f0c7458d9f62e7b7c22a",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/a41c588fc3f4d6c3686f872f493ba32b61a46cfd0cb8f0c7458d9f62e7b7c22a"],
 )
 
 rpm(
     name = "gnutls-dane-0__3.8.10-3.el9.s390x",
     sha256 = "8e8793bc2a500256747f4745bed2d7b494854153d52e064a51aeb252c214dd26",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/AppStream/s390x/os/Packages/gnutls-dane-3.8.10-3.el9.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/8e8793bc2a500256747f4745bed2d7b494854153d52e064a51aeb252c214dd26",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/8e8793bc2a500256747f4745bed2d7b494854153d52e064a51aeb252c214dd26"],
 )
 
 rpm(
     name = "gnutls-dane-0__3.8.10-3.el9.x86_64",
     sha256 = "9d8148e86c8013335fe8747bc113eda9ba6ad59921c057ab9715f6f9beb17288",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/Packages/gnutls-dane-3.8.10-3.el9.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/9d8148e86c8013335fe8747bc113eda9ba6ad59921c057ab9715f6f9beb17288",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/9d8148e86c8013335fe8747bc113eda9ba6ad59921c057ab9715f6f9beb17288"],
 )
 
 rpm(
@@ -4076,28 +4058,19 @@ rpm(
 rpm(
     name = "gnutls-utils-0__3.8.10-3.el9.aarch64",
     sha256 = "d88cfcc208c54f0fb9182785356382295d188d680e190340a2c187aa15e49faa",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/AppStream/aarch64/os/Packages/gnutls-utils-3.8.10-3.el9.aarch64.rpm",
-        "https://storage.googleapis.com/builddeps/d88cfcc208c54f0fb9182785356382295d188d680e190340a2c187aa15e49faa",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/d88cfcc208c54f0fb9182785356382295d188d680e190340a2c187aa15e49faa"],
 )
 
 rpm(
     name = "gnutls-utils-0__3.8.10-3.el9.s390x",
     sha256 = "8938b2f992f04bd4a120d1052db7865c58dc42f88e35e917f3628ee00d5e091d",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/AppStream/s390x/os/Packages/gnutls-utils-3.8.10-3.el9.s390x.rpm",
-        "https://storage.googleapis.com/builddeps/8938b2f992f04bd4a120d1052db7865c58dc42f88e35e917f3628ee00d5e091d",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/8938b2f992f04bd4a120d1052db7865c58dc42f88e35e917f3628ee00d5e091d"],
 )
 
 rpm(
     name = "gnutls-utils-0__3.8.10-3.el9.x86_64",
     sha256 = "e9e4aff0e53b81327f6bfd5c0a07de4be8900fd8e466c301c2b74c5af74fb508",
-    urls = [
-        "http://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/Packages/gnutls-utils-3.8.10-3.el9.x86_64.rpm",
-        "https://storage.googleapis.com/builddeps/e9e4aff0e53b81327f6bfd5c0a07de4be8900fd8e466c301c2b74c5af74fb508",
-    ],
+    urls = ["https://storage.googleapis.com/builddeps/e9e4aff0e53b81327f6bfd5c0a07de4be8900fd8e466c301c2b74c5af74fb508"],
 )
 
 rpm(
