@@ -1,50 +1,92 @@
 # KubeVirt AIE
 
-**KubeVirt Accelerated Infrastructure Enablement (AIE)** is a release-branch fork of [KubeVirt](https://github.com/kubevirt/kubevirt) that produces an alternative `virt-launcher` container image based on [CentOS Stream 10](https://centos.org/) with NVIDIA-optimised (el10nv) RPMs for libvirt and QEMU. The image includes IOMMU-FD support and backported device patches required for GPU passthrough on NVIDIA ARM64 platforms such as GraceHopper, GraceBlackwell, and Vera Rubin.
+**KubeVirt Accelerated Infrastructure Enablement (AIE)** brings support for emerging accelerated infrastructure to [KubeVirt](https://github.com/kubevirt/kubevirt). It provides release-based integration branches where contributors can develop and validate hardware enablement while preparing changes for upstream inclusion.
 
-This repository tracks the upstream KubeVirt `release-1.8` branch with a minimal set of additional commits. Only the `virt-launcher` image is produced here; all other KubeVirt components (virt-operator, virt-api, virt-controller, virt-handler) are consumed from the standard KubeVirt release.
+The initial focus is NVIDIA ARM64 virtualization, including GPU passthrough on Grace Hopper, Grace Blackwell, and Vera Rubin. Available capabilities depend on the selected branch and its kernel, QEMU, and libvirt dependencies. See the branch documentation for platform requirements and validation status.
 
-## Why a separate fork?
+## Why KubeVirt AIE ?
 
-GPU passthrough on ARM64 depends on a newer userspace stack (IOMMU-FD, backported QEMU device patches, libvirt changes) that is only available in the CentOS Stream 10 el10nv RPM variants. Since the standard KubeVirt `virt-launcher` is based on CentOS Stream 9, the alternative image must be built and delivered separately.
+Hardware enablement often requires coordinated changes across the Linux kernel, QEMU, libvirt, KubeVirt, and Kubernetes. These changes can become available at different times and may require integration and testing before they reach standard releases.
+
+Accelerated platforms also introduce requirements such as large PCI BARs, coherent device memory, accelerated IOMMUs, and complex CPU, GPU, and NIC topologies. Supporting these systems can require changes to both the virtualization stack and how KubeVirt constructs and manages virtual machines.
+
+KubeVirt AIE provides a shared place to integrate this work, test complete configurations, and develop changes with a path upstream. It works alongside the [CentOS Accelerated Infrastructure Enablement SIG](https://sigs.centos.org/aie/), which develops kernel and virtualization-stack.
+
+Red Hat and NVIDIA collaborate through KubeVirt WG AIE and the CentOS AIE SIG to coordinate hardware enablement across the virtualization stack. CentOS AIE packages and NVIDIA development branches provide different dependency paths for integration and validation. KubeVirt AIE brings this work together around shared requirements, testing, and contributions to upstream KubeVirt.
+
+![NVIDIA and Red Hat collaboration through CentOS AIE and KubeVirt AIE, showing dependency integration and contributions to upstream projects](docs/waterfall-pipeline.svg)
+
+*The diagram shows the intended collaboration and integration paths.
+Feature availability and validation status depend on the selected branch and dependency stack.*
 
 The [WG AIE](https://github.com/kubevirt/community/tree/main/wg-aie) requires that changes carried in this fork are upstreamed back into [kubevirt/kubevirt](https://github.com/kubevirt/kubevirt) as soon as possible. Retiring this fork requires upstreaming at two levels: the el10nv RPM patches must be integrated into the main CentOS Stream 10 repositories by the AIE SIG, and the broader [CentOS Stream 10 transition (VEP #210)](https://github.com/kubevirt/enhancements/issues/210) must land in KubeVirt (planned across v1.9-v1.11). Only once both are complete can the standard KubeVirt `virt-launcher` build include the necessary hardware enablement and this fork be retired.
 
-## KubeVirt WG AIE
-
-The [KubeVirt Accelerated Infrastructure Enablement Working Group (WG AIE)](https://github.com/kubevirt/community/tree/main/wg-aie) aims to track and where possible extend KubeVirt in line with the CentOS Stream Accelerated Infrastructure Enablement SIG. The working group is a stakeholder of both sig-compute and sig-network within the KubeVirt community.
 
 **Chairs:**
 
 - [Lee Yarwood](https://github.com/lyarwood), Red Hat
-- [Alay Patel](https://github.com/alaypatel07), NVIDIA
+- [Fan Zhang](https://github.com/fanzhangio), NVIDIA
 
 **Meetings:**
 
 - Fortnightly on Thursdays at 15:00 UTC
-- [Zoom link](https://zoom.us/j/92261532235)
+- [Zoom link](https://zoom-lfx.platform.linuxfoundation.org/meeting/98466361192?password=8b5bb80a-9770-4d90-87e7-c6addb598c7f)
 - [Meeting notes](https://docs.google.com/document/d/1Tz7GubzbSOliRv2kFXamVhV66v1Wo9HH9hwwRQVYrDk)
 
 ## CentOS Stream AIE SIG
 
 This work is aligned with the [CentOS Accelerated Infrastructure SIG](https://sigs.centos.org/aie/), which produces the el10nv RPM variants of libvirt and QEMU in CentOS Stream 10. The AIE SIG focuses on enabling accelerated and heterogeneous computing infrastructure, with packages optimised for NVIDIA hardware available from [CentOS Stream 10 koji](https://kojihub.stream.centos.org). WG AIE coordinates the integration of these packages into the KubeVirt ecosystem. For more information on the broader CentOS AIE SIG initiative, see the [CentOS Accelerated Infrastructure SIG documentation](https://docs.centos.org/centos-accelerated-infrastructure-sig/).
 
-## Architecture
+## Scope and release branches
 
-The kubevirt-aie `virt-launcher` image is one component of a larger architecture for NVIDIA hardware enablement in KubeVirt. The full system consists of four components:
+AIE branches track selected upstream KubeVirt releases and carry the changes needed for their hardware enablement goals.
 
-| Component | Repository | Summary |
-| :-------- | :--------- | :------ |
-| **kubevirt-aie virt-launcher** | This repo | CentOS Stream 10-based `virt-launcher` with el10nv RPMs for libvirt and QEMU |
-| **AIE webhook** | [kubevirt-aie-webhook](https://github.com/kubevirt/kubevirt-aie-webhook) | Mutating admission webhook that replaces the launcher image, injects IOMMUFD resource limits, and optionally adds node affinity |
-| **IOMMUFD device plugin** | [iommufd-device-plugin](https://github.com/kubevirt/iommufd-device-plugin) | Kubernetes device plugin that opens and configures `/dev/iommu` on the host and passes the file descriptor to virt-launcher via SCM_RIGHTS |
-| **HCO integration** | [hyperconverged-cluster-operator](https://github.com/kubevirt/hyperconverged-cluster-operator) | HCO operand handlers that deploy and reconcile the webhook and device plugin on OpenShift |
+Depending on the branch, these changes can include:
 
-For detailed design documents covering each component, see the [kubevirt-aie-veps](https://github.com/kubevirt/kubevirt-aie-veps) repository.
+- QEMU and libvirt package integration.
+- Alternative `virt-launcher` images.
+- KubeVirt device assignment and domain configuration changes.
+- Supporting deployment components and validation tools.
 
-## Rebasing on upstream releases
+Some branches provide an alternative `virt-launcher` image for use with an otherwise standard KubeVirt release. Branches that change other KubeVirt components require the corresponding component images.
 
-Manual rebases onto new v1.8.z releases from the upstream [kubevirt/kubevirt `release-1.8`](https://github.com/kubevirt/kubevirt/tree/release-1.8) branch will be performed on this branch. The patch delta is kept intentionally small to minimise rebase friction.
+Use the build and deployment instructions for the selected branch. Do not assume that launcher images, component images, or virtualization packages are interchangeable across branches.
+
+## Virtualization dependencies
+
+CentOS Stream AIE provides a path for integrating hardware enablement into the CentOS Stream ecosystem. AIE configurations can use NVIDIA-enabled QEMU and libvirt packages, inlcuding [CentOS Accelerated Infrastructure SIG](https://sigs.centos.org/aie/), particular the `el10nv` variants.
+
+Development configurations may also use packages built from dedicated branches of [NVIDIA QEMU](https://github.com/NVIDIA/QEMU) and [NVIDIA libvirt](https://github.com/NVIDIA/libvirt). These configurations require a compatible host kernel and platform setup.
+
+The branch documentation should identify the package sources, required versions, and tested configurations. The presence of a feature in source code or an RPM does not establish that the complete configuration has been validated.
+
+## Related components
+
+The AIE ecosystem includes supporting projects for launcher selection, IOMMUFD access, and deployment integration. The components required depend on the selected configuration.
+
+| Component | Purpose |
+| :--- | :--- |
+| [KubeVirt AIE](https://github.com/kubevirt/kubevirt-aie) | Integrates KubeVirt changes and virtualization dependencies for accelerated infrastructure. |
+| [AIE webhook](https://github.com/kubevirt/kubevirt-aie-webhook) | Supports launcher image substitution and admission-time configuration for AIE deployments. |
+| [IOMMUFD device plugin](https://github.com/kubevirt/iommufd-device-plugin) | Opens and configures an IOMMUFD on the host and passes its file descriptor to `virt-launcher`. |
+| [HyperConverged Cluster Operator](https://github.com/kubevirt/hyperconverged-cluster-operator) | Provides operator-managed integration for OpenShift Virtualization deployments. |
+
+Design proposals are maintained in [kubevirt-aie-veps](https://github.com/kubevirt/kubevirt-aie-veps).
+
+## Upstream direction
+
+The goal is to make these capabilities available through standard KubeVirt releases and their supported dependencies.
+
+This requires work at several levels:
+
+- Contribute kernel, QEMU, and libvirt changes to their respective upstream projects.
+- Integrate the necessary packages into standard CentOS Stream.
+- Contribute reusable KubeVirt capabilities, tests, and documentation upstream.
+
+Changes carried by AIE should have a clear upstream plan. Branch-specific patches can be removed as equivalent capabilities become available in the upstream release and dependency stack.
+
+The [CentOS Stream 10 transition proposal](https://github.com/kubevirt/enhancements/issues/210) is part of this dependency alignment. Retirement of an AIE branch depends on its remaining changes and dependencies being available upstream, rather than on a fixed release date alone.
+
 
 ## What this fork changes
 
