@@ -420,18 +420,19 @@ echo ""
 echo "Updating rpm/BUILD.bazel..."
 
 build_count=0
-for key in "${!OLD_NAMES[@]}"; do
-    old="${OLD_NAMES[${key}]}"
-    new="${NEW_NAMES[${key}]:-}"
-    if [[ -z "${new}" ]]; then
-        continue
-    fi
-    if grep -q "@${old}//rpm" "${BUILD_FILE}"; then
+for key in "${!NEW_NAMES[@]}"; do
+    subpkg="${key%:*}"
+    arch="${key##*:}"
+    new="${NEW_NAMES[${key}]}"
+    # Read BUILD references directly: carried-over NV-only debug targets may
+    # not have had WORKSPACE entries when this release branch was bootstrapped.
+    while IFS= read -r old; do
+        [[ "${old}" == "${new}" ]] && continue
         old_escaped="${old//./\\.}"
+        count=$(grep -Fc "@${old}//rpm" "${BUILD_FILE}" || true)
         sed -i "s|@${old_escaped}//rpm|@${new}//rpm|g" "${BUILD_FILE}"
-        count=$(grep -c "@${new}//rpm" "${BUILD_FILE}" || true)
         build_count=$((build_count + count))
-    fi
+    done < <(grep -oP "@\K${subpkg}-\d+__[^\"]*\.el10(?:nv[^\"]*)?\.${arch}(?=//rpm)" "${BUILD_FILE}" | sort -u)
 done
 
 echo "Updated rpm/BUILD.bazel: ${build_count} references updated"

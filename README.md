@@ -2,7 +2,7 @@
 
 **KubeVirt Accelerated Infrastructure Enablement (AIE)** is a release-branch fork of [KubeVirt](https://github.com/kubevirt/kubevirt) that produces an alternative `virt-launcher` container image based on [CentOS Stream 10](https://centos.org/) with NVIDIA-optimised (el10nv) RPMs for libvirt and QEMU. The image includes IOMMU-FD support and backported device patches required for GPU passthrough on NVIDIA ARM64 platforms such as GraceHopper, GraceBlackwell, and Vera Rubin.
 
-This repository tracks the upstream KubeVirt `release-1.9` branch with a minimal set of additional commits. Only the `virt-launcher` image is produced here; all other KubeVirt components (virt-operator, virt-api, virt-controller, virt-handler) are consumed from the standard KubeVirt release.
+This repository tracks the upstream KubeVirt `release-1.10` branch with a minimal set of additional commits. Only the `virt-launcher` image is produced here; all other KubeVirt components (virt-operator, virt-api, virt-controller, virt-handler) are consumed from the standard KubeVirt release.
 
 ## Why a separate fork?
 
@@ -28,7 +28,7 @@ The [KubeVirt Accelerated Infrastructure Enablement Working Group (WG AIE)](http
 
 ## CentOS Stream AIE SIG
 
-This work is aligned with the [CentOS Accelerated Infrastructure SIG](https://sigs.centos.org/aie/), which produces the el10nv RPM variants of libvirt and QEMU in CentOS Stream 10. The AIE SIG focuses on enabling accelerated and heterogeneous computing infrastructure, with packages optimised for NVIDIA hardware available from [CentOS Stream 10 koji](https://kojihub.stream.centos.org). WG AIE coordinates the integration of these packages into the KubeVirt ecosystem. For more information on the broader CentOS AIE SIG initiative, see the [CentOS Accelerated Infrastructure SIG documentation](https://docs.centos.org/centos-accelerated-infrastructure-sig/).
+This work is aligned with the [CentOS Accelerated Infrastructure SIG](https://sigs.centos.org/aie/), which produces the el10nv RPM variants of libvirt and QEMU in CentOS Stream 10. The AIE SIG focuses on enabling accelerated and heterogeneous computing infrastructure, with packages optimised for NVIDIA hardware available from [the CentOS Stream 10 AIE compose](https://composes.stream.centos.org/stream-10/aie/nv). WG AIE coordinates the integration of these packages into the KubeVirt ecosystem. For more information on the broader CentOS AIE SIG initiative, see the [CentOS Accelerated Infrastructure SIG documentation](https://docs.centos.org/centos-accelerated-infrastructure-sig/).
 
 ## Architecture
 
@@ -38,13 +38,13 @@ For detailed design documents, see the [kubevirt-aie-veps](https://github.com/ku
 
 ## Rebasing on upstream releases
 
-Manual rebases onto new v1.9.z releases from the upstream [kubevirt/kubevirt `release-1.9`](https://github.com/kubevirt/kubevirt/tree/release-1.9) branch will be performed on this branch. The patch delta is kept intentionally small to minimise rebase friction.
+Manual rebases onto new v1.10.z releases from the upstream [kubevirt/kubevirt `release-1.10`](https://github.com/kubevirt/kubevirt/tree/release-1.10) branch will be performed on this branch. The patch delta is kept intentionally small to minimise rebase friction.
 
 ## What this fork changes
 
-The delta against the upstream `release-1.9` branch is intentionally small:
+The delta against the upstream `release-1.10` branch is intentionally small:
 
-- **NV RPM sync infrastructure** (`hack/sync-nv-rpms.sh`) -- Automated discovery and download of el10nv RPMs from CentOS Stream 10 koji
+- **NV RPM sync infrastructure** (`hack/sync-nv-rpms.sh`) -- Automated discovery and download of el10nv RPMs from the CentOS Stream 10 AIE compose
 - **WORKSPACE and rpm/BUILD.bazel updates** -- Bazel build definitions for the el10nv RPM packages
 - **CentOS Stream 10 builder** (`hack/builder/Dockerfile.cs10`) -- Build toolchain for multi-architecture (x86_64, aarch64) image builds
 - **WIP image push script** (`hack/push-virt-launcher-pr.sh`) -- Convenience script for building and pushing images from feature branches
@@ -54,11 +54,11 @@ The delta against the upstream `release-1.9` branch is intentionally small:
 ### Syncing NV RPMs
 
 ```shell
-# Auto-discover latest el10nv versions from koji
+# Auto-discover latest el10nv versions from the AIE compose
 hack/sync-nv-rpms.sh
 
 # Override specific versions
-LIBVIRT_NV_VERSION=11.10.0 QEMU_NV_VERSION=10.1.0 hack/sync-nv-rpms.sh
+LIBVIRT_NV_VERSION=12.5.0 QEMU_NV_VERSION=11.1.0 hack/sync-nv-rpms.sh
 ```
 
 ### Building and pushing a WIP virt-launcher image
@@ -75,7 +75,7 @@ DOCKER_PREFIX=quay.io/myorg DOCKER_TAG=test-1 hack/push-virt-launcher-pr.sh
 
 ```shell
 DOCKER_PREFIX=quay.io/kubevirt/kubevirt-aie \
-DOCKER_TAG=v1.9.0-aie-nv \
+DOCKER_TAG=v1.10.0-aie-nv \
 BUILD_ARCH=amd64,crossbuild-aarch64 \
 make bazel-push-images
 ```
