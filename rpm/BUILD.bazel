@@ -336,7 +336,6 @@ centos_stream_alias(
     visibility = ["//visibility:public"],
 )
 
-
 # Path-based aliases for libvirt-libs tar2files outputs
 centos_stream_alias(
     name = "libvirt-libs_x86_64/usr/lib64",

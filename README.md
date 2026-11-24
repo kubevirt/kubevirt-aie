@@ -76,6 +76,7 @@ DOCKER_PREFIX=quay.io/myorg DOCKER_TAG=test-1 hack/push-virt-launcher-pr.sh
 ```shell
 DOCKER_PREFIX=quay.io/kubevirt/kubevirt-aie \
 DOCKER_TAG=v1.10.0-aie-nv \
+KUBEVIRT_CENTOS_STREAM_VERSION=10 \
 BUILD_ARCH=amd64,crossbuild-aarch64 \
 make bazel-push-images
 ```

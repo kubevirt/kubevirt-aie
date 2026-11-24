@@ -21,9 +21,9 @@ set -eo pipefail
 
 DOCKER_PREFIX=${DOCKER_PREFIX:-"quay.io/kubevirt/kubevirt-aie"}
 KUBEVIRT_CENTOS_STREAM_VERSION=${KUBEVIRT_CENTOS_STREAM_VERSION:-"10"}
-KUBEVIRT_CS10_BUILDER_VERSION=${KUBEVIRT_CS10_BUILDER_VERSION:-"2602251001-25ce1ccb15"}
 
 branch=$(git rev-parse --abbrev-ref HEAD)
+branch=$(printf '%s' "${branch}" | sed 's/[^a-zA-Z0-9_.-]/-/g' | cut -c 1-100)
 short_sha=$(git rev-parse --short=10 HEAD)
 docker_tag="wip-${branch}-${short_sha}"
 DOCKER_TAG=${DOCKER_TAG:-"${docker_tag}"}
@@ -32,13 +32,11 @@ echo "Building and pushing virt-launcher manifest"
 echo "  DOCKER_PREFIX: ${DOCKER_PREFIX}"
 echo "  DOCKER_TAG:    ${DOCKER_TAG}"
 echo "  KUBEVIRT_CENTOS_STREAM_VERSION: ${KUBEVIRT_CENTOS_STREAM_VERSION}"
-echo "  KUBEVIRT_CS10_BUILDER_VERSION:  ${KUBEVIRT_CS10_BUILDER_VERSION}"
 echo ""
 echo "  Image: ${DOCKER_PREFIX}/virt-launcher:${DOCKER_TAG}"
 echo ""
 
 export KUBEVIRT_CENTOS_STREAM_VERSION
-export KUBEVIRT_CS10_BUILDER_VERSION
 export DOCKER_PREFIX
 export DOCKER_TAG
 export BUILD_ARCH="amd64,crossbuild-aarch64"

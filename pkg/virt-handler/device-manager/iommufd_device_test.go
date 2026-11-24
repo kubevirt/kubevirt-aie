@@ -202,12 +202,8 @@ var _ = Describe("IOMMUFD Device Plugin", func() {
 
 			It("should produce unique socket paths for concurrent allocations", func() {
 				openAndConfigureIOMMUFDFunc = func(_ string) (int, error) {
-					r, w, err := os.Pipe()
-					if err != nil {
-						return -1, err
-					}
-					w.Close()
-					return int(r.Fd()), nil
+					// The socket owns this raw FD and closes it with unix.Close.
+					return unix.Open("/dev/null", unix.O_RDWR|unix.O_CLOEXEC, 0)
 				}
 				dp := NewIOMMUFDDevicePlugin(10)
 				req := &pluginapi.AllocateRequest{
@@ -261,10 +257,10 @@ var _ = Describe("IOMMUFD Device Plugin", func() {
 		It("should create a socket and pass an FD to a connecting client", func() {
 			tmpDir := GinkgoT().TempDir()
 
-			r, w, err := os.Pipe()
+			// Use a raw FD: an os.File finalizer could close a reused descriptor
+			// after createIOMMUFDSocket closes the original with unix.Close.
+			fd, err := unix.Open("/dev/null", unix.O_RDWR|unix.O_CLOEXEC, 0)
 			Expect(err).NotTo(HaveOccurred())
-			defer w.Close()
-			fd := int(r.Fd())
 
 			socketPath, err := createIOMMUFDSocket(fd, tmpDir)
 			Expect(err).NotTo(HaveOccurred())
@@ -303,11 +299,10 @@ var _ = Describe("IOMMUFD Device Plugin", func() {
 			tmpDir := GinkgoT().TempDir()
 			socketDir := filepath.Join(tmpDir, "subdir")
 
-			r, w, err := os.Pipe()
+			fd, err := unix.Open("/dev/null", unix.O_RDWR|unix.O_CLOEXEC, 0)
 			Expect(err).NotTo(HaveOccurred())
-			defer w.Close()
 
-			socketPath, err := createIOMMUFDSocket(int(r.Fd()), socketDir)
+			socketPath, err := createIOMMUFDSocket(fd, socketDir)
 			Expect(err).NotTo(HaveOccurred())
 
 			info, err := os.Stat(socketDir)
@@ -322,18 +317,16 @@ var _ = Describe("IOMMUFD Device Plugin", func() {
 		It("should create unique socket paths for concurrent allocations", func() {
 			tmpDir := GinkgoT().TempDir()
 
-			r1, w1, err := os.Pipe()
-			Expect(err).NotTo(HaveOccurred())
-			defer w1.Close()
-
-			r2, w2, err := os.Pipe()
-			Expect(err).NotTo(HaveOccurred())
-			defer w2.Close()
-
-			path1, err := createIOMMUFDSocket(int(r1.Fd()), tmpDir)
+			fd1, err := unix.Open("/dev/null", unix.O_RDWR|unix.O_CLOEXEC, 0)
 			Expect(err).NotTo(HaveOccurred())
 
-			path2, err := createIOMMUFDSocket(int(r2.Fd()), tmpDir)
+			fd2, err := unix.Open("/dev/null", unix.O_RDWR|unix.O_CLOEXEC, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			path1, err := createIOMMUFDSocket(fd1, tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+
+			path2, err := createIOMMUFDSocket(fd2, tmpDir)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(path1).NotTo(Equal(path2))

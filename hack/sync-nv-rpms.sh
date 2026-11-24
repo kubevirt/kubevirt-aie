@@ -96,9 +96,9 @@ download_pkglists() {
     local arch=$1
     local pkglist="${WORK_DIR}/pkglist_${arch}"
     if [[ ! -f "${pkglist}" ]]; then
-        curl -sSL "${COMPOSE_BASE_URL}/${arch}/pkglist" >"${pkglist}"
-        curl -sSL "${COMPOSE_BASE_URL}/${arch}/debug/pkglist" |
-            sed 's|^\.\./||' >>"${pkglist}"
+        curl -fsSL "${COMPOSE_BASE_URL}/${arch}/pkglist" >"${pkglist}" || return 1
+        curl -fsSL "${COMPOSE_BASE_URL}/${arch}/debug/pkglist" |
+            sed 's|^\.\./||' >>"${pkglist}" || return 1
     fi
     echo "${pkglist}"
 }
@@ -106,7 +106,7 @@ download_pkglists() {
 discover_latest_nvr() {
     local ref_subpkg=$1
     local pkglist
-    pkglist=$(download_pkglists x86_64)
+    pkglist=$(download_pkglists x86_64) || return 1
     grep "/${ref_subpkg}-[0-9]" "${pkglist}" |
         grep '\.el10nv' |
         grep -oP '[^/]+$' |
@@ -237,8 +237,18 @@ download_subpackages() {
             local key="${subpkg}:${arch}"
             NEW_NAMES["${key}"]="${bazel_name}"
 
-            # Skip download if the version/release hasn't changed.
-            if [[ "${OLD_NAMES[${key}]:-}" == "${bazel_name}" ]]; then
+            # Regenerate both architectures together if either changed: insertion
+            # replaces every NV entry for this subpackage in WORKSPACE.
+            local unchanged=true
+            local check_arch check_key
+            for check_arch in "${arch_list[@]}"; do
+                check_key="${subpkg}:${check_arch}"
+                if [[ "${OLD_NAMES[${check_key}]:-}" != "${subpkg}-${epoch}__${version}-${release}.${check_arch}" ]]; then
+                    unchanged=false
+                    break
+                fi
+            done
+            if ${unchanged}; then
                 echo "  ${rpm_filename} (unchanged, skipping download)"
                 continue
             fi
