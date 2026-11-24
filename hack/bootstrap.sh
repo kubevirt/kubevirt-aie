@@ -26,7 +26,7 @@ KUBEVIRT_NO_BAZEL=${KUBEVIRT_NO_BAZEL:-false}
 HOST_ARCHITECTURE="$(uname -m)"
 
 sandbox_root=${SANDBOX_DIR}/default/root
-sandbox_hash="824b9e870dca02522645dd6079d0f348e365445d"
+sandbox_hash="a46aff27b1aedcd35a1a31b56d82fe2c334e2c8f612c137acd0327ff6c620f50"
 
 function kubevirt::bootstrap::regenerate() {
     (
@@ -71,7 +71,7 @@ EOT
 function kubevirt::bootstrap::sha256() {
     (
         cd ${KUBEVIRT_DIR}
-        sha256sum rpm/BUILD.bazel | head -c 40
+        sha256sum rpm/BUILD.bazel | head -c 64
     )
 }
 

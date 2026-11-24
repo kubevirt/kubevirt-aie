@@ -294,6 +294,10 @@ image_manifest(
             ":qemu-kvm-modules-dir-layer",
             ":var-run-symlink-layer",
         ],
+    }) + select({
+        "//rpm:include_debuginfo_aarch64": ["//rpm:nv_debuginfo_aarch64"],
+        "//rpm:include_debuginfo_x86_64": ["//rpm:nv_debuginfo_x86_64"],
+        "//conditions:default": [],
     }),
 )
 
